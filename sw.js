@@ -1,5 +1,5 @@
-const CACHE='fm-foto-app-v7.0.0';
-const CORE=['./','./index.html','./styles.css?v=7.0.0','./operator.css?v=7.0.0','./operator.js?v=7.0.0','./config.js?v=7.0.0','./manifest.webmanifest','./icon.svg','./admin.html'];
+const CACHE='fm-foto-app-v7.2.0';
+const CORE=['./','./index.html','./styles.css?v=7.2.0','./operator.css?v=7.2.0','./operator.js?v=7.2.0','./config.js?v=7.2.0','./manifest.webmanifest','./icon.svg','./admin.html'];
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)))});
 self.addEventListener('activate',e=>e.waitUntil(Promise.all([
  caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('fm-foto-app-')&&k!==CACHE).map(k=>caches.delete(k)))),

@@ -20,3 +20,5 @@
 .operator-note{background:#fffaf0;border-color:#fde7b0}
 .operator-counter{display:flex;justify-content:space-between;align-items:center;padding:14px 4px 0;color:#718096;font-size:11px}
 .operator-counter strong{font-size:22px;color:#172033}
+
+.operator-capture:disabled{opacity:.55}

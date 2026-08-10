@@ -8,8 +8,8 @@
 <title>FM foto</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v=7.0.0">
-<link rel="stylesheet" href="operator.css?v=7.0.0">
+<link rel="stylesheet" href="styles.css?v=7.2.0">
+<link rel="stylesheet" href="operator.css?v=7.2.0">
 </head>
 <body class="operator-body">
 <header class="fm-header operator-header">
@@ -34,8 +34,8 @@
       <div class="operator-camera-icon">📷</div>
       <div id="readyTitle" class="operator-ready-title">Attendo posizione…</div>
       <div id="readySub" class="operator-ready-sub">La posizione viene acquisita automaticamente.</div>
-      <label id="captureLabel" class="fm-btn primary operator-capture disabled" for="cameraInput">SCATTA FOTO</label>
-      <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden disabled>
+      <button id="captureBtn" class="fm-btn primary operator-capture" type="button">SCATTA FOTO</button>
+      <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
     </div>
 
     <div id="workingCard" class="fm-card operator-progress hidden">
@@ -66,7 +66,7 @@
   </section>
 </main>
 
-<script src="config.js?v=7.0.0"></script>
-<script src="operator.js?v=7.0.0"></script>
+<script src="config.js?v=7.2.0"></script>
+<script src="operator.js?v=7.2.0"></script>
 </body>
 </html>

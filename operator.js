@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=7;
+const DB_VERSION=8;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.0.0';
+const APP_VERSION='7.2.0';
 
 let db=null;
 let currentPosition=null;
@@ -24,6 +24,7 @@ async function init(){
   db=await openDB();
   settings=await loadSettings();
   $('cameraInput').addEventListener('change',handlePhoto);
+  $('captureBtn').addEventListener('click',handleCaptureTap);
 
   await updateCount();
   updateNetworkState();
@@ -34,10 +35,10 @@ async function init(){
   });
   window.addEventListener('offline',updateNetworkState);
 
-  requestLocation();
+  warmLocation();
 
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js?v=7.0.0').catch(()=>{});
+    navigator.serviceWorker.register('./sw.js?v=7.2.0').catch(()=>{});
   }
 
   if(navigator.onLine){
@@ -94,37 +95,96 @@ async function loadSettings(){
   return Object.assign({},window.FM_FOTO_DEFAULTS||{});
 }
 
-function requestLocation(){
-  setState('wait','Acquisizione GPS…');
-  disableCapture(true);
+function warmLocation(){
+  // Tentativo silenzioso all'avvio. Se iOS/Brave non risponde,
+  // l'utente può comunque premere SCATTA FOTO e la richiesta GPS
+  // verrà fatta dentro il gesto dell'utente.
+  setState('wait','Preparazione…');
+  $('readyTitle').textContent='Pronto';
+  $('readySub').textContent='Premi SCATTA FOTO. Posizione e fotocamera si attivano automaticamente.';
 
   if(!navigator.geolocation){
     setState('err','GPS non disponibile');
     $('readyTitle').textContent='GPS non disponibile';
-    $('readySub').textContent='La posizione è necessaria.';
     return;
   }
 
-  navigator.geolocation.getCurrentPosition(pos=>{
-    currentPosition={
-      lat:pos.coords.latitude,
-      lng:pos.coords.longitude,
-      accuracy:pos.coords.accuracy
-    };
+  navigator.geolocation.getCurrentPosition(
+    pos=>savePosition(pos),
+    ()=>{},
+    {enableHighAccuracy:true,timeout:5000,maximumAge:30000}
+  );
+}
 
-    setState('ok','Pronto');
-    $('readyTitle').textContent='Pronto allo scatto';
-    $('readySub').textContent=`Posizione acquisita · ±${Math.round(pos.coords.accuracy)} m`;
-    disableCapture(false);
-  },()=>{
-    setState('err','GPS necessario');
-    $('readyTitle').textContent='Posizione necessaria';
-    $('readySub').textContent='Consenti la posizione per usare FM foto.';
-  },{
-    enableHighAccuracy:true,
-    timeout:15000,
-    maximumAge:15000
+function savePosition(pos){
+  currentPosition={
+    lat:pos.coords.latitude,
+    lng:pos.coords.longitude,
+    accuracy:pos.coords.accuracy,
+    capturedAt:Date.now()
+  };
+
+  setState('ok','Pronto');
+  $('readyTitle').textContent='Pronto allo scatto';
+  $('readySub').textContent=`Posizione acquisita · ±${Math.round(pos.coords.accuracy)} m`;
+}
+
+function acquireLocation(){
+  return new Promise((resolve,reject)=>{
+    if(!navigator.geolocation){
+      reject(new Error('GPS non supportato dal browser'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      pos=>{
+        savePosition(pos);
+        resolve(currentPosition);
+      },
+      err=>{
+        let message='Impossibile acquisire la posizione.';
+        if(err && err.code===1) message='Consenti la posizione a questo sito nelle impostazioni del browser.';
+        if(err && err.code===2) message='Posizione temporaneamente non disponibile.';
+        if(err && err.code===3) message='Tempo scaduto durante la ricerca della posizione.';
+        reject(new Error(message));
+      },
+      {
+        enableHighAccuracy:true,
+        timeout:15000,
+        maximumAge:10000
+      }
+    );
   });
+}
+
+async function handleCaptureTap(){
+  if(isBusy)return;
+
+  const btn=$('captureBtn');
+  btn.disabled=true;
+  setState('wait','Acquisizione GPS…');
+  $('readyTitle').textContent='Acquisisco la posizione…';
+  $('readySub').textContent='Attendi qualche secondo.';
+
+  try{
+    // Richiesta eseguita dentro il tap: più affidabile su iOS/Brave/Safari.
+    await acquireLocation();
+
+    // Appena il GPS è disponibile, apre la fotocamera.
+    $('cameraInput').click();
+  }catch(err){
+    console.warn(err);
+    setState('err','Posizione non disponibile');
+    $('readyTitle').textContent='Posizione necessaria';
+    $('readySub').textContent=String(err?.message||err);
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+function requestLocation(){
+  // Alias mantenuto per compatibilità con eventuali vecchi richiami.
+  return acquireLocation();
 }
 
 async function handlePhoto(e){
@@ -138,7 +198,7 @@ async function handlePhoto(e){
   }
 
   isBusy=true;
-  disableCapture(true);
+  setCaptureBusy(true);
   showWorking('Elaborazione foto…','Salvataggio sicuro sul dispositivo.');
 
   let rec=null;
@@ -204,7 +264,7 @@ async function handlePhoto(e){
   }finally{
     e.target.value='';
     isBusy=false;
-    disableCapture(false);
+    setCaptureBusy(false);
     setTimeout(()=>$('successCard').classList.add('hidden'),5000);
   }
 }
@@ -340,9 +400,9 @@ function showSuccess(text){
   $('successText').textContent=text;
   $('successCard').classList.remove('hidden');
 }
-function disableCapture(v){
-  $('cameraInput').disabled=v;
-  $('captureLabel').classList.toggle('disabled',v);
+function setCaptureBusy(v){
+  const btn=$('captureBtn');
+  if(btn)btn.disabled=v;
 }
 function setState(state,text){
   $('globalDot').className=`status-dot ${state}`;
