@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=12;
+const DB_VERSION=13;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.6.0';
+const APP_VERSION='7.7.0';
 
 let db=null;
 let currentPosition=null;
@@ -32,8 +32,13 @@ async function init(){
   $('archiveImportInput').addEventListener('change',handleArchiveImport);
   $('missingGpsBtn').addEventListener('click',async()=>{showMissingGpsOnly=!showMissingGpsOnly;$('missingGpsBtn').classList.toggle('primary',showMissingGpsOnly);await renderArchive();});
   $('assignCurrentLocationBtn').addEventListener('click',assignCurrentLocationToOpenPhoto);
+  $('retryQueueBtn').addEventListener('click',async()=>{
+    await resetFailedQueue();
+    await processImportQueue(true);
+  });
 
   await updateCount();
+  await updateQueueStatus();
   updateNetworkState();
 
   setState('ok','Pronto');
@@ -42,6 +47,8 @@ async function init(){
 
   window.addEventListener('online',async()=>{
     updateNetworkState();
+    await recoverInterruptedQueue();
+    await processImportQueue(false);
     await retryPending();
   });
   window.addEventListener('offline',updateNetworkState);
@@ -50,11 +57,15 @@ async function init(){
   warmLocation();
 
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js?v=7.6.0').catch(()=>{});
+    navigator.serviceWorker.register('./sw.js?v=7.7.0').catch(()=>{});
   }
 
   if(navigator.onLine){
-    setTimeout(retryPending,1500);
+    setTimeout(async()=>{
+      await recoverInterruptedQueue();
+      await processImportQueue(false);
+      await retryPending();
+    },1500);
   }
 }
 function openDB(){
@@ -285,7 +296,14 @@ async function retryPending(){
   if(!navigator.onLine||!settings.backendEndpoint)return;
 
   const photos=await getAllPhotos();
-  const pending=photos.filter(p=>p.backendStatus!=='completed'||p.syncStatus!=='synced');
+  const pending=photos.filter(
+    p=>
+      p.source!=='archive-import' &&
+      (
+        p.backendStatus!=='completed' ||
+        p.syncStatus!=='synced'
+      )
+  );
 
   for(const rec of pending){
     try{
@@ -445,28 +463,362 @@ function bindNavigation(){
 }
 
 async function handleArchiveImport(e){
-  const files=[...(e.target.files||[])]; if(!files.length)return;
-  $('importProgress').classList.remove('hidden'); let ok=0,failed=0;
+  const files=[...(e.target.files||[])];
+  if(!files.length)return;
+
+  $('importProgress').classList.remove('hidden');
+
+  let saved=0;
+  let failed=0;
+
+  // FASE 1: salva TUTTE le foto localmente. Nessuna chiamata AI/Drive qui.
   for(let i=0;i<files.length;i++){
-    const file=files[i]; $('importProgressTitle').textContent=`Importazione ${i+1}/${files.length}`; $('importProgressSub').textContent=file.name;
+    const file=files[i];
+
+    $('importProgressTitle').textContent=`Salvataggio ${i+1}/${files.length}`;
+    $('importProgressSub').textContent=file.name;
+
     try{
       let exif={};
-      try{if(window.exifr){exif=await exifr.parse(file,{gps:true,tiff:true,exif:true,pick:['DateTimeOriginal','CreateDate','ModifyDate','latitude','longitude']})||{}}}catch(err){console.warn('EXIF',err)}
-      const image=await compress(file,1600,.78);
-      const exifDate=exif.DateTimeOriginal||exif.CreateDate||exif.ModifyDate;
-      const capturedAt=exifDate instanceof Date?exifDate.getTime():(exifDate?Date.parse(exifDate):Date.now());
-      const lat=Number.isFinite(Number(exif.latitude))?Number(exif.latitude):null;
-      const lng=Number.isFinite(Number(exif.longitude))?Number(exif.longitude):null;
-      const rec={image,createdAt:Number.isFinite(capturedAt)?capturedAt:Date.now(),lat,lng,accuracy:0,tags:['da classificare'],manualTags:[],aiStatus:'pending',aiConfidence:null,aiSummary:'',syncStatus:'pending',backendStatus:'pending',driveFileId:'',source:'archive-import',schemaVersion:12,appVersion:APP_VERSION};
-      rec.id=await addPhoto(rec);
-      if(navigator.onLine){
-        const result=await sendToBackend(rec);
-        rec.tags=normalizeTags(result.tags||[]); rec.aiStatus='classified'; rec.aiConfidence=Number.isFinite(Number(result.confidence))?Number(result.confidence):null; rec.aiSummary=String(result.summary||'').slice(0,280); rec.syncStatus=result.driveUploaded?'synced':'pending'; rec.backendStatus='completed'; rec.driveFileId=result.driveFileId||''; rec.syncedAt=result.driveUploaded?Date.now():null; rec.lastError=''; await putPhoto(rec);
+
+      try{
+        if(window.exifr){
+          exif=await exifr.parse(file,{
+            gps:true,
+            tiff:true,
+            exif:true,
+            pick:[
+              'DateTimeOriginal',
+              'CreateDate',
+              'ModifyDate',
+              'latitude',
+              'longitude'
+            ]
+          })||{};
+        }
+      }catch(exifErr){
+        console.warn('EXIF non leggibile',exifErr);
       }
-      ok++;
-    }catch(err){console.warn('Import fallito',file.name,err);failed++;}
+
+      const image=await compress(file,1600,.78);
+
+      const exifDate=
+        exif.DateTimeOriginal||
+        exif.CreateDate||
+        exif.ModifyDate;
+
+      const parsedDate=
+        exifDate instanceof Date
+          ? exifDate.getTime()
+          : (exifDate?Date.parse(exifDate):Date.now());
+
+      const capturedAt=
+        Number.isFinite(parsedDate)
+          ? parsedDate
+          : Date.now();
+
+      const lat=
+        Number.isFinite(Number(exif.latitude))
+          ? Number(exif.latitude)
+          : null;
+
+      const lng=
+        Number.isFinite(Number(exif.longitude))
+          ? Number(exif.longitude)
+          : null;
+
+      const rec={
+        image,
+        createdAt:capturedAt,
+        originalFileName:file.name||'',
+        lat,
+        lng,
+        accuracy:0,
+
+        tags:['da classificare'],
+        manualTags:[],
+
+        aiStatus:'pending',
+        aiConfidence:null,
+        aiSummary:'',
+
+        syncStatus:'pending',
+        backendStatus:'pending',
+
+        importQueueStatus:'pending',
+        importAttempts:0,
+        importLastAttempt:0,
+        importLastError:'',
+
+        driveFileId:'',
+        source:'archive-import',
+
+        schemaVersion:13,
+        appVersion:APP_VERSION
+      };
+
+      await addPhoto(rec);
+      saved++;
+
+    }catch(err){
+      console.warn('Salvataggio import fallito',file.name,err);
+      failed++;
+    }
   }
-  sharedArchiveFetchedAt=0; await updateCount(); await renderArchive(); $('importProgressTitle').textContent='Importazione completata'; $('importProgressSub').textContent=`${ok} importate${failed?` · ${failed} non riuscite`:''}`; setTimeout(()=>$('importProgress').classList.add('hidden'),4500); e.target.value='';
+
+  e.target.value='';
+
+  await updateCount();
+  await updateQueueStatus();
+  await renderArchive();
+
+  $('importProgressTitle').textContent='Foto messe in coda';
+  $('importProgressSub').textContent=
+    `${saved} salvate localmente${failed?` · ${failed} non importate`:''}`;
+
+  // Nasconde il riquadro di import, ma la coda resta visibile.
+  setTimeout(()=>$('importProgress').classList.add('hidden'),2500);
+
+  // FASE 2: elabora la coda separatamente, una foto alla volta.
+  if(navigator.onLine){
+    processImportQueue(false);
+  }
+}
+
+async function recoverInterruptedQueue(){
+  const photos=await getAllPhotos();
+
+  for(const rec of photos){
+    if(rec.source==='archive-import' && rec.importQueueStatus==='processing'){
+      rec.importQueueStatus='pending';
+      rec.backendStatus='pending';
+      rec.syncStatus='pending';
+      await putPhoto(rec);
+    }
+  }
+
+  await updateQueueStatus();
+}
+
+async function resetFailedQueue(){
+  const photos=await getAllPhotos();
+
+  for(const rec of photos){
+    if(
+      rec.source==='archive-import' &&
+      (
+        rec.importQueueStatus==='error' ||
+        rec.backendStatus==='error'
+      ) &&
+      rec.syncStatus!=='synced'
+    ){
+      rec.importQueueStatus='pending';
+      rec.backendStatus='pending';
+      rec.importLastError='';
+      rec.lastError='';
+      await putPhoto(rec);
+    }
+  }
+
+  await updateQueueStatus();
+  await renderArchive();
+}
+
+async function processImportQueue(forceRetry=false){
+  if(!navigator.onLine || !settings.backendEndpoint){
+    await updateQueueStatus();
+    return;
+  }
+
+  // Elaborazione strettamente sequenziale.
+  let keepGoing=true;
+
+  while(keepGoing){
+    const photos=await getAllPhotos();
+
+    const rec=photos.find(p=>
+      p.source==='archive-import' &&
+      p.syncStatus!=='synced' &&
+      (
+        p.importQueueStatus==='pending' ||
+        (
+          forceRetry &&
+          p.importQueueStatus==='error'
+        )
+      )
+    );
+
+    if(!rec){
+      keepGoing=false;
+      break;
+    }
+
+    rec.importQueueStatus='processing';
+    rec.backendStatus='processing';
+    rec.importAttempts=(Number(rec.importAttempts)||0)+1;
+    rec.importLastAttempt=Date.now();
+    rec.importLastError='';
+    await putPhoto(rec);
+
+    await updateQueueStatus();
+    if($('archiveView')?.classList.contains('active')){
+      await renderArchive();
+    }
+
+    try{
+      const result=await sendToBackend(rec);
+
+      rec.tags=normalizeTags([
+        ...(result.tags||[]),
+        ...(rec.manualTags||[])
+      ]);
+
+      rec.aiStatus='classified';
+      rec.aiConfidence=
+        Number.isFinite(Number(result.confidence))
+          ? Number(result.confidence)
+          : null;
+
+      rec.aiSummary=
+        String(result.summary||'')
+          .slice(0,280);
+
+      rec.syncStatus=
+        result.driveUploaded
+          ? 'synced'
+          : 'pending';
+
+      rec.backendStatus='completed';
+
+      rec.importQueueStatus=
+        result.driveUploaded
+          ? 'synced'
+          : 'pending';
+
+      rec.driveFileId=
+        result.driveFileId||
+        rec.driveFileId||
+        '';
+
+      rec.syncedAt=
+        result.driveUploaded
+          ? Date.now()
+          : rec.syncedAt;
+
+      rec.importLastError='';
+      rec.lastError='';
+
+      await putPhoto(rec);
+
+      sharedArchiveFetchedAt=0;
+
+    }catch(err){
+      const message=String(err?.message||err);
+
+      rec.importQueueStatus='error';
+      rec.backendStatus='error';
+      rec.syncStatus='pending';
+      rec.importLastError=message;
+      rec.lastError=message;
+
+      await putPhoto(rec);
+
+      console.warn(
+        'Import queue error',
+        rec.originalFileName||rec.id,
+        message
+      );
+
+      // Non blocca tutta la coda: continua con la foto successiva.
+    }
+
+    await updateQueueStatus();
+
+    if($('archiveView')?.classList.contains('active')){
+      await renderArchive();
+    }
+
+    // Piccola pausa per non saturare browser / Worker durante import massivi.
+    await new Promise(resolve=>setTimeout(resolve,350));
+  }
+
+  sharedArchiveFetchedAt=0;
+
+  try{
+    await fetchSharedArchive(true);
+  }catch{}
+
+  await updateQueueStatus();
+
+  if($('archiveView')?.classList.contains('active')){
+    await renderArchive();
+  }
+}
+
+async function updateQueueStatus(){
+  const photos=await getAllPhotos();
+
+  const imports=photos.filter(
+    p=>p.source==='archive-import'
+  );
+
+  const done=imports.filter(
+    p=>p.syncStatus==='synced'
+  ).length;
+
+  const processing=imports.filter(
+    p=>p.importQueueStatus==='processing'
+  ).length;
+
+  const errors=imports.filter(
+    p=>p.importQueueStatus==='error' && p.syncStatus!=='synced'
+  ).length;
+
+  const pending=imports.filter(
+    p=>
+      p.syncStatus!=='synced' &&
+      p.importQueueStatus!=='error'
+  ).length;
+
+  const total=imports.length;
+
+  if($('queueDone'))$('queueDone').textContent=done;
+  if($('queuePending'))$('queuePending').textContent=pending;
+  if($('queueErrors'))$('queueErrors').textContent=errors;
+
+  const completedForProgress=
+    done+errors;
+
+  const pct=
+    total
+      ? Math.round((completedForProgress/total)*100)
+      : 0;
+
+  if($('queueProgressBar')){
+    $('queueProgressBar').style.width=`${pct}%`;
+  }
+
+  let text='Nessuna foto in attesa.';
+
+  if(total){
+    if(processing){
+      text=`Elaborazione in corso · ${done}/${total} sincronizzate`;
+    }else if(pending){
+      text=`${pending} foto in attesa · ${done}/${total} sincronizzate`;
+    }else if(errors){
+      text=`${errors} foto da riprovare · ${done}/${total} sincronizzate`;
+    }else{
+      text=`Completata · ${done}/${total} sincronizzate`;
+    }
+  }
+
+  if($('queueStatusText')){
+    $('queueStatusText').textContent=text;
+  }
+
+  if($('retryQueueBtn')){
+    $('retryQueueBtn').disabled=(errors===0 && pending===0);
+  }
 }
 
 async function assignCurrentLocationToOpenPhoto(){
@@ -485,6 +837,7 @@ async function assignCurrentLocationToOpenPhoto(){
 }
 
 async function renderArchive(){
+  await updateQueueStatus();
   let photos=await getUnifiedPhotos(true);
   if(showMissingGpsOnly){photos=photos.filter(p=>p.lat===null||p.lng===null||!Number.isFinite(Number(p.lat))||!Number.isFinite(Number(p.lng)));}
   const host=$('archiveGallery'); if(!host)return;
@@ -529,9 +882,35 @@ async function renderTagGallery(){
 
 
 function photoCardHTML(p){
-  const noGps=(p.lat===null||p.lng===null||!Number.isFinite(Number(p.lat))||!Number.isFinite(Number(p.lng)));
-  return `<button class="photo-card ${noGps?'no-gps':''}" data-id="${escapeHtml(p.id)}">
+  const noGps=(
+    p.lat===null||
+    p.lng===null||
+    !Number.isFinite(Number(p.lat))||
+    !Number.isFinite(Number(p.lng))
+  );
+
+  let queueClass='';
+  let queueLabel='';
+
+  if(p.source==='archive-import' && !p.remote){
+    if(p.syncStatus==='synced'){
+      queueClass='queue-synced';
+      queueLabel='✓ Drive';
+    }else if(p.importQueueStatus==='processing'){
+      queueClass='queue-processing';
+      queueLabel='Elaborazione';
+    }else if(p.importQueueStatus==='error'){
+      queueClass='queue-error';
+      queueLabel='Da riprovare';
+    }else{
+      queueClass='queue-pending';
+      queueLabel='In coda';
+    }
+  }
+
+  return `<button class="photo-card ${noGps?'no-gps':''} ${queueClass}" data-id="${escapeHtml(p.id)}">
     <img src="${p.image}" alt="Foto cantiere">
+    ${queueLabel?`<span class="queue-photo-badge">${escapeHtml(queueLabel)}</span>`:''}
     <div class="overlay">${new Date(p.createdAt).toLocaleDateString('it-IT')}<br>${(p.tags||[]).slice(0,3).map(escapeHtml).join(' · ')}</div>
   </button>`;
 }

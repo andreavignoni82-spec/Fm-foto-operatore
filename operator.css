@@ -62,3 +62,17 @@
 .archive-import-btn{flex:1;text-align:center}
 .location-assign-btn{margin-top:12px;width:100%}
 .photo-card.no-gps::after{content:"Senza GPS";position:absolute;top:7px;left:7px;background:rgba(17,24,39,.82);color:#fff;border-radius:6px;padding:4px 6px;font-size:9px;font-weight:800}
+
+.queue-status-card{padding:13px;margin-bottom:11px}
+.queue-status-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.queue-status-top strong{display:block;font-size:12px}
+.queue-status-top small{display:block;margin-top:3px;color:#7b8798;font-size:10px}
+.queue-progress-track{height:7px;border-radius:999px;background:#e9eef5;overflow:hidden;margin-top:11px}
+.queue-progress-bar{height:100%;background:#1976d2;border-radius:999px;transition:width .25s ease}
+.queue-counters{display:flex;gap:12px;flex-wrap:wrap;margin-top:9px;color:#64748b;font-size:10px}
+.queue-counters b{color:#172033}
+.queue-photo-badge{position:absolute;right:7px;top:7px;z-index:2;padding:4px 6px;border-radius:6px;background:rgba(255,255,255,.94);font-size:9px;font-weight:900;color:#334155}
+.photo-card.queue-error .queue-photo-badge{color:#b91c1c;background:#fff1f2}
+.photo-card.queue-processing .queue-photo-badge{color:#a16207;background:#fffbeb}
+.photo-card.queue-pending .queue-photo-badge{color:#475569;background:#f8fafc}
+.photo-card.queue-synced .queue-photo-badge{color:#15803d;background:#f0fdf4}
