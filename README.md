@@ -1,14 +1,16 @@
-# FM foto Operatore V2.7.1 — Queue Loop Fix
+# FM foto Operatore V2.7.2 — iPhone Import Queue Fix
 
-Correzione V2.7:
-- eliminato il loop infinito del pulsante "Riprova non sincronizzate";
-- ogni foto viene tentata al massimo una volta per ogni ciclo della coda;
-- una foto fallita resta in stato ERRORE e non viene ripresa immediatamente;
-- un nuovo tentativo avviene solo premendo di nuovo Riprova;
-- se il backend non conferma driveUploaded, la foto passa a ERRORE anziché tornare pending;
-- pulsante Retry disabilitato mentre una coda è in elaborazione;
-- contatori pending/processing separati correttamente;
-- database v14, migrazione non distruttiva;
-- Worker V2.6 invariato.
+Worker richiesto: V2.8 (invariato).
 
-Aggiorna solo i file GitHub/PWA.
+Correzioni:
+- import da galleria iPhone salva prima le foto localmente;
+- al termine attende esplicitamente la coda di upload;
+- nuovo pulsante "Avvia caricamento";
+- nuovo pulsante "Riprova errori";
+- blocco anti-doppia coda;
+- una singola foto viene processata una sola volta per ciclo;
+- pausa maggiore tra upload per iOS/Safari;
+- stato AI letto dal Worker: se quota AI esaurita la foto può risultare da classificare ma Drive è comunque sincronizzato;
+- DB v15 non distruttivo.
+
+Aggiorna solo GitHub/PWA. Non cambiare il Worker V2.8.

@@ -8,8 +8,8 @@
 <title>FM foto</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v=7.7.1">
-<link rel="stylesheet" href="operator.css?v=7.7.1">
+<link rel="stylesheet" href="styles.css?v=7.7.2">
+<link rel="stylesheet" href="operator.css?v=7.7.2">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 </head>
 <body class="operator-body">
@@ -110,7 +110,10 @@
           <strong>Coda importazione</strong>
           <small id="queueStatusText">Nessuna foto in attesa.</small>
         </div>
-        <button id="retryQueueBtn" class="fm-btn secondary compact" type="button">Riprova non sincronizzate</button>
+        <div class="queue-actions">
+          <button id="startQueueBtn" class="fm-btn primary compact" type="button">Avvia caricamento</button>
+          <button id="retryQueueBtn" class="fm-btn secondary compact" type="button">Riprova errori</button>
+        </div>
       </div>
       <div class="queue-progress-track">
         <div id="queueProgressBar" class="queue-progress-bar" style="width:0%"></div>
@@ -157,7 +160,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
-<script src="config.js?v=7.7.1"></script>
-<script src="operator.js?v=7.7.1"></script>
+<script src="config.js?v=7.7.2"></script>
+<script src="operator.js?v=7.7.2"></script>
 </body>
 </html>

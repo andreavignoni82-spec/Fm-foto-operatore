@@ -76,3 +76,6 @@
 .photo-card.queue-processing .queue-photo-badge{color:#a16207;background:#fffbeb}
 .photo-card.queue-pending .queue-photo-badge{color:#475569;background:#f8fafc}
 .photo-card.queue-synced .queue-photo-badge{color:#15803d;background:#f0fdf4}
+
+.queue-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.queue-actions .fm-btn{white-space:nowrap}

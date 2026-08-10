@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=14;
+const DB_VERSION=15;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.1';
+const APP_VERSION='7.7.2';
 
 let db=null;
 let currentPosition=null;
@@ -32,6 +32,11 @@ async function init(){
   $('archiveImportInput').addEventListener('change',handleArchiveImport);
   $('missingGpsBtn').addEventListener('click',async()=>{showMissingGpsOnly=!showMissingGpsOnly;$('missingGpsBtn').classList.toggle('primary',showMissingGpsOnly);await renderArchive();});
   $('assignCurrentLocationBtn').addEventListener('click',assignCurrentLocationToOpenPhoto);
+  $('startQueueBtn').addEventListener('click',async()=>{
+    await recoverInterruptedQueue();
+    await processImportQueue(false);
+  });
+
   $('retryQueueBtn').addEventListener('click',async()=>{
     $('retryQueueBtn').disabled=true;
     try{
@@ -62,7 +67,7 @@ async function init(){
   warmLocation();
 
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js?v=7.7.1').catch(()=>{});
+    navigator.serviceWorker.register('./sw.js?v=7.7.2').catch(()=>{});
   }
 
   if(navigator.onLine){
@@ -448,6 +453,7 @@ let currentModalPhotoId=null;
 let sharedArchiveCache=[];
 let sharedArchiveFetchedAt=0;
 let showMissingGpsOnly=false;
+let importQueueRunning=false;
 let map=null,markersLayer=null;
 let activeTags=new Set();
 let mapTags=new Set();
@@ -586,7 +592,8 @@ async function handleArchiveImport(e){
 
   // FASE 2: elabora la coda separatamente, una foto alla volta.
   if(navigator.onLine){
-    processImportQueue(false);
+    // Su iOS/Safari attendiamo esplicitamente la coda.
+    await processImportQueue(false);
   }
 }
 
@@ -630,143 +637,149 @@ async function resetFailedQueue(){
 }
 
 async function processImportQueue(forceRetry=false){
+  if(importQueueRunning){
+    return;
+  }
+
   if(!navigator.onLine || !settings.backendEndpoint){
     await updateQueueStatus();
     return;
   }
 
-  /*
-    LOOP GUARD:
-    ogni record può essere tentato al massimo UNA VOLTA
-    durante questa singola esecuzione della coda.
+  importQueueRunning=true;
 
-    Se fallisce resta "error" e verrà ritentato solo:
-    - premendo nuovamente "Riprova non sincronizzate", oppure
-    - dopo un reset esplicito dello stato.
-  */
+  if($('startQueueBtn'))$('startQueueBtn').disabled=true;
+  if($('retryQueueBtn'))$('retryQueueBtn').disabled=true;
+
   const attemptedThisRun=new Set();
 
-  while(true){
-    const photos=await getAllPhotos();
+  try{
+    while(true){
+      const photos=await getAllPhotos();
 
-    const rec=photos.find(p=>{
-      if(p.source!=='archive-import')return false;
-      if(p.syncStatus==='synced')return false;
-      if(attemptedThisRun.has(String(p.id)))return false;
+      const rec=photos.find(p=>{
+        if(p.source!=='archive-import')return false;
+        if(p.syncStatus==='synced')return false;
+        if(attemptedThisRun.has(String(p.id)))return false;
 
-      if(p.importQueueStatus==='pending')return true;
+        if(p.importQueueStatus==='pending' || !p.importQueueStatus){
+          return true;
+        }
 
-      if(
-        forceRetry &&
-        p.importQueueStatus==='error'
-      ){
-        return true;
+        if(forceRetry && p.importQueueStatus==='error'){
+          return true;
+        }
+
+        return false;
+      });
+
+      if(!rec)break;
+
+      attemptedThisRun.add(String(rec.id));
+
+      rec.importQueueStatus='processing';
+      rec.backendStatus='processing';
+      rec.importAttempts=(Number(rec.importAttempts)||0)+1;
+      rec.importLastAttempt=Date.now();
+      rec.importLastError='';
+      await putPhoto(rec);
+
+      await updateQueueStatus();
+
+      if($('archiveView')?.classList.contains('active')){
+        await renderArchive();
       }
 
-      return false;
-    });
+      try{
+        const result=await sendToBackend(rec);
 
-    if(!rec)break;
+        rec.tags=normalizeTags([
+          ...(result.tags||[]),
+          ...(rec.manualTags||[])
+        ]);
 
-    attemptedThisRun.add(String(rec.id));
+        // Rispetta il vero stato AI restituito dal Worker V2.8.
+        rec.aiStatus=result.aiStatus||'classified';
 
-    rec.importQueueStatus='processing';
-    rec.backendStatus='processing';
-    rec.importAttempts=(Number(rec.importAttempts)||0)+1;
-    rec.importLastAttempt=Date.now();
-    rec.importLastError='';
-    await putPhoto(rec);
+        rec.aiConfidence=
+          Number.isFinite(Number(result.confidence))
+            ? Number(result.confidence)
+            : null;
 
-    await updateQueueStatus();
+        rec.aiSummary=
+          String(result.summary||'')
+            .slice(0,280);
 
-    if($('archiveView')?.classList.contains('active')){
-      await renderArchive();
+        rec.aiError=
+          String(result.aiError||'')
+            .slice(0,250);
+
+        if(result.driveUploaded===true){
+          rec.syncStatus='synced';
+          rec.backendStatus='completed';
+          rec.importQueueStatus='synced';
+
+          rec.driveFileId=
+            result.driveFileId||
+            rec.driveFileId||
+            '';
+
+          rec.syncedAt=Date.now();
+          rec.importLastError='';
+          rec.lastError='';
+        }else{
+          rec.syncStatus='pending';
+          rec.backendStatus='error';
+          rec.importQueueStatus='error';
+          rec.importLastError='Il backend non ha confermato il salvataggio Drive.';
+          rec.lastError=rec.importLastError;
+        }
+
+        await putPhoto(rec);
+        sharedArchiveFetchedAt=0;
+
+      }catch(err){
+        const message=String(err?.message||err);
+
+        rec.importQueueStatus='error';
+        rec.backendStatus='error';
+        rec.syncStatus='pending';
+        rec.importLastError=message;
+        rec.lastError=message;
+
+        await putPhoto(rec);
+
+        console.warn(
+          'Import queue error',
+          rec.originalFileName||rec.id,
+          message
+        );
+      }
+
+      await updateQueueStatus();
+
+      if($('archiveView')?.classList.contains('active')){
+        await renderArchive();
+      }
+
+      // Su iPhone lasciamo tempo al browser tra upload consecutivi.
+      await new Promise(resolve=>setTimeout(resolve,700));
     }
+
+    sharedArchiveFetchedAt=0;
 
     try{
-      const result=await sendToBackend(rec);
+      await fetchSharedArchive(true);
+    }catch{}
 
-      rec.tags=normalizeTags([
-        ...(result.tags||[]),
-        ...(rec.manualTags||[])
-      ]);
-
-      rec.aiStatus='classified';
-
-      rec.aiConfidence=
-        Number.isFinite(Number(result.confidence))
-          ? Number(result.confidence)
-          : null;
-
-      rec.aiSummary=
-        String(result.summary||'')
-          .slice(0,280);
-
-      if(result.driveUploaded){
-        rec.syncStatus='synced';
-        rec.backendStatus='completed';
-        rec.importQueueStatus='synced';
-        rec.driveFileId=
-          result.driveFileId||
-          rec.driveFileId||
-          '';
-        rec.syncedAt=Date.now();
-        rec.importLastError='';
-        rec.lastError='';
-      }else{
-        /*
-          Il backend ha risposto ma non ha confermato Drive:
-          trattiamo l'evento come errore terminale del tentativo,
-          non come "pending", così non viene ciclato all'infinito.
-        */
-        rec.syncStatus='pending';
-        rec.backendStatus='error';
-        rec.importQueueStatus='error';
-        rec.importLastError='Upload Drive non confermato dal backend.';
-        rec.lastError=rec.importLastError;
-      }
-
-      await putPhoto(rec);
-      sharedArchiveFetchedAt=0;
-
-    }catch(err){
-      const message=String(err?.message||err);
-
-      rec.importQueueStatus='error';
-      rec.backendStatus='error';
-      rec.syncStatus='pending';
-      rec.importLastError=message;
-      rec.lastError=message;
-
-      await putPhoto(rec);
-
-      console.warn(
-        'Import queue error',
-        rec.originalFileName||rec.id,
-        message
-      );
-    }
+  }finally{
+    importQueueRunning=false;
 
     await updateQueueStatus();
 
     if($('archiveView')?.classList.contains('active')){
       await renderArchive();
     }
-
-    // Pausa breve tra una foto e la successiva.
-    await new Promise(resolve=>setTimeout(resolve,350));
-  }
-
-  sharedArchiveFetchedAt=0;
-
-  try{
-    await fetchSharedArchive(true);
-  }catch{}
-
-  await updateQueueStatus();
-
-  if($('archiveView')?.classList.contains('active')){
-    await renderArchive();
   }
 }
 
@@ -822,7 +835,7 @@ async function updateQueueStatus(){
     if(processing){
       text=`Elaborazione in corso · ${done}/${total} sincronizzate`;
     }else if(pending){
-      text=`${pending} foto in attesa · ${done}/${total} sincronizzate`;
+      text=`${pending} foto da caricare · ${done}/${total} sincronizzate`;
     }else if(errors){
       text=`${errors} foto da riprovare · ${done}/${total} sincronizzate`;
     }else{
@@ -834,10 +847,16 @@ async function updateQueueStatus(){
     $('queueStatusText').textContent=text;
   }
 
+  if($('startQueueBtn')){
+    $('startQueueBtn').disabled=
+      importQueueRunning ||
+      pending===0;
+  }
+
   if($('retryQueueBtn')){
     $('retryQueueBtn').disabled=
-      processing>0 ||
-      (errors===0 && pending===0);
+      importQueueRunning ||
+      errors===0;
   }
 }
 
