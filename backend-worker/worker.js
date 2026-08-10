@@ -145,7 +145,8 @@ async function uploadPhoto(token,rootId,input,classification){
       tags:(classification.tags||[]).join("|"),
       manualTags:(input.manualTags||[]).join("|"),
       summary:String(classification.summary||"").slice(0,120),
-      accuracy:String(input.accuracy??"")
+      accuracy:String(input.accuracy??""),
+      source:String(input.source||"camera")
     }
   };
 
@@ -180,32 +181,22 @@ async function classify(env,input){
   const allowedTags=Array.isArray(input.allowedTags)?input.allowedTags:[];
 
   const prompt=`
-Sei il classificatore fotografico tecnico di FAMAFER,
-azienda di carpenteria metallica.
+Sei il classificatore visuale di FM foto.
+Analizza l'immagine in modo generale e preciso. NON sei limitato alla carpenteria.
+Puoi riconoscere qualunque oggetto, materiale, ambiente, edificio, impianto, mezzo, attrezzatura, arredo, elemento naturale o dettaglio visibile.
 
-Analizza solo ciò che è realmente visibile nella fotografia.
+Genera tag su più livelli: categoria generale, oggetto specifico, materiale, finitura/colore se riconoscibile, funzione/uso, ambiente/contesto, stato, stile o caratteristica distintiva.
 
-Classifica:
-- tipologia opera;
-- materiale, solo se riconoscibile;
-- finitura, solo se riconoscibile;
-- interno/esterno;
-- stato di montaggio/installazione.
+Esempi: recinzione + recinzione in lamiera + lamiera + acciaio + verniciato + nero + esterno; recinzione + recinzione inox + inox + satinato + esterno; cancello + cancello carrabile + automazione + acciaio + verniciato; serramento + finestra + alluminio + vetro; impianto elettrico + quadro elettrico; veicolo + automobile + SUV; arredo + tavolo + legno.
 
-Vocabolario preferito:
+Vocabolario suggerito, NON vincolante:
 ${allowedTags.join(", ")}
 
-Assegna da 2 a 8 tag.
-Non inventare materiale o finitura.
-summary: massimo 20 parole in italiano.
-confidence: numero da 0 a 1.
-
-Rispondi esclusivamente in JSON:
-{
-  "tags":["..."],
-  "confidence":0.85,
-  "summary":"..."
-}`;
+Puoi creare tag nuovi se descrivono meglio ciò che è visibile. Evita sinonimi inutilmente duplicati. Genera da 4 a 14 tag quando l'immagine lo consente. Non inventare materiale, finitura o funzione se non sono ragionevolmente riconoscibili.
+summary: descrizione in italiano, massimo 25 parole. confidence: numero da 0 a 1.
+Rispondi esclusivamente in JSON valido:
+{"tags":["..."],"confidence":0.85,"summary":"..."}
+`;
 
   const result=await env.AI.run(MODEL,{
     prompt,
@@ -225,7 +216,7 @@ Rispondi esclusivamente in JSON:
       (parsed.tags||[])
         .map(x=>String(x).trim().toLowerCase())
         .filter(Boolean)
-    )].slice(0,8),
+    )].slice(0,14),
     confidence:Math.max(0,Math.min(1,Number(parsed.confidence)||0)),
     summary:String(parsed.summary||"").trim().slice(0,280)
   };
@@ -248,10 +239,12 @@ async function listArchive(token,env){
     return {
       driveFileId:f.id,name:f.name,createdTime:f.createdTime,
       capturedAt:Number(ap.capturedAt)||Date.parse(f.createdTime)||0,
-      lat:Number(ap.lat),lng:Number(ap.lng),accuracy:Number(ap.accuracy)||0,
+      lat:(ap.lat===""||typeof ap.lat==="undefined")?null:Number(ap.lat),
+      lng:(ap.lng===""||typeof ap.lng==="undefined")?null:Number(ap.lng),accuracy:Number(ap.accuracy)||0,
       tags:(ap.tags||"").split("|").map(x=>x.trim()).filter(Boolean),
       manualTags:(ap.manualTags||"").split("|").map(x=>x.trim()).filter(Boolean),
       summary:ap.summary||"",
+      source:ap.source||"camera",
       photoUrl:`${env.PUBLIC_BASE_URL}/photo?id=${encodeURIComponent(f.id)}`
     };
   });
@@ -276,6 +269,15 @@ async function updateDriveTags(token,fileId,manualTags){
   await r.json(); return {tags,manualTags:cleaned};
 }
 
+
+async function updateDriveLocation(token,fileId,lat,lng,accuracy){
+  const metaRes=await driveRequest(token,`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,appProperties`);
+  const file=await metaRes.json(),ap=file.appProperties||{};
+  const patch={appProperties:{...ap,lat:String(lat),lng:String(lng),accuracy:String(accuracy||0)}};
+  const r=await driveRequest(token,`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,appProperties`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
+  await r.json(); return {lat:Number(lat),lng:Number(lng),accuracy:Number(accuracy)||0};
+}
+
 export default{
   async fetch(request,env){
     if(request.method==="OPTIONS"){
@@ -288,7 +290,7 @@ export default{
       return json({
         service:"FM foto backend",
         status:"online",
-        version:"2.5",
+        version:"2.6",
         ai:true,
         driveBackend:true,
         config:{
@@ -354,6 +356,16 @@ export default{
       }catch(err){
         return json({ok:false,error:"UPDATE_TAGS_FAILED",message:String(err?.message||err)},500);
       }
+    }
+
+    if(request.method==="POST"&&url.pathname==="/update-location"){
+      try{
+        const input=await request.json(); if(!input.driveFileId)return json({ok:false,error:"MISSING_FILE_ID"},400);
+        if(!Number.isFinite(Number(input.lat))||!Number.isFinite(Number(input.lng)))return json({ok:false,error:"INVALID_LOCATION"},400);
+        const token=await googleAccessToken(env);
+        const result=await updateDriveLocation(token,input.driveFileId,Number(input.lat),Number(input.lng),Number(input.accuracy)||0);
+        return json({ok:true,...result});
+      }catch(err){return json({ok:false,error:"UPDATE_LOCATION_FAILED",message:String(err?.message||err)},500);}
     }
 
     if(request.method!=="POST"||url.pathname!=="/process"){
