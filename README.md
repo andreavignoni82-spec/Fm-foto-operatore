@@ -1,7 +1,17 @@
-# FM foto Operatore V1
-Root: interfaccia operatore, solo scatto.
-Admin: /admin.html, non linkato dalla UI operatore.
-Database `famaferFotoCantiere`, schema v6, aggiornamento non distruttivo.
-Config di default: Drive e AI già preimpostati.
+# FM foto Operatore V2 — Backend Drive
 
-Nota: su nuovi telefoni Google OAuth può richiedere un provisioning iniziale amministrativo tramite /admin.html; dopo l'autorizzazione l'operaio usa solo la root.
+Obiettivo:
+l'operaio usa FM foto su qualsiasi telefono senza login Google.
+
+Flusso:
+SCATTA → GPS → salvataggio locale → Cloudflare Worker → AI → Google Drive.
+
+La root non contiene OAuth Google e non presenta configurazioni.
+
+Database:
+famaferFotoCantiere, schema v7, migrazione non distruttiva.
+
+Backend:
+vedi /backend-worker/worker.js
+
+Per completare il backend vanno configurati una sola volta su Cloudflare i secrets Google.
