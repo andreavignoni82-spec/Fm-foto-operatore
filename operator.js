@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=15;
+const DB_VERSION=16;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.2';
+const APP_VERSION='7.7.3';
 
 let db=null;
 let currentPosition=null;
@@ -473,6 +473,181 @@ function bindNavigation(){
   });
 }
 
+
+function validEpochMs(value){
+  const n=Number(value);
+  if(!Number.isFinite(n))return null;
+
+  // Between 2000-01-01 and tomorrow. Avoid bogus EXIF dates.
+  const min=Date.UTC(2000,0,1);
+  const max=Date.now()+86400000;
+
+  return (n>=min && n<=max) ? n : null;
+}
+
+function parseExifDate(value){
+  if(!value)return null;
+
+  if(value instanceof Date){
+    return validEpochMs(value.getTime());
+  }
+
+  if(typeof value==='number'){
+    // exifr normally returns Date for EXIF date fields,
+    // but accept timestamps defensively.
+    if(value<1e12)value*=1000;
+    return validEpochMs(value);
+  }
+
+  const raw=String(value).trim();
+  if(!raw)return null;
+
+  // EXIF standard style: YYYY:MM:DD HH:mm:ss
+  const m=raw.match(
+    /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/
+  );
+
+  if(m){
+    const d=new Date(
+      Number(m[1]),
+      Number(m[2])-1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+      Number(m[6])
+    );
+
+    return validEpochMs(d.getTime());
+  }
+
+  const parsed=Date.parse(raw);
+  return validEpochMs(parsed);
+}
+
+function validCoordinate(value,min,max){
+  const n=Number(value);
+  return Number.isFinite(n) && n>=min && n<=max ? n : null;
+}
+
+async function readOriginalPhotoMetadata(file){
+  const result={
+    capturedAt:null,
+    lat:null,
+    lng:null,
+    accuracy:0,
+    dateSource:'none',
+    gpsSource:'none',
+    exifAvailable:false
+  };
+
+  if(window.exifr){
+    // 1) Full EXIF/TIFF/HEIF parse for original capture date.
+    try{
+      const parsed=await exifr.parse(file,{
+        tiff:true,
+        exif:true,
+        gps:true,
+        ifd0:true,
+        ifd1:false,
+        interop:false,
+        makerNote:false,
+        userComment:false,
+        xmp:true,
+        icc:false,
+        iptc:false,
+        jfif:false,
+        pick:[
+          'DateTimeOriginal',
+          'CreateDate',
+          'ModifyDate',
+          'DateTime',
+          'OffsetTimeOriginal',
+          'OffsetTimeDigitized',
+          'OffsetTime',
+          'GPSLatitude',
+          'GPSLongitude',
+          'GPSLatitudeRef',
+          'GPSLongitudeRef',
+          'latitude',
+          'longitude',
+          'GPSHPositioningError'
+        ]
+      })||{};
+
+      result.exifAvailable=Object.keys(parsed).length>0;
+
+      const dateCandidates=[
+        ['DateTimeOriginal',parsed.DateTimeOriginal],
+        ['CreateDate',parsed.CreateDate],
+        ['DateTime',parsed.DateTime],
+        ['ModifyDate',parsed.ModifyDate]
+      ];
+
+      for(const [source,value] of dateCandidates){
+        const ms=parseExifDate(value);
+        if(ms!==null){
+          result.capturedAt=ms;
+          result.dateSource='EXIF:'+source;
+          break;
+        }
+      }
+
+      const pLat=validCoordinate(parsed.latitude,-90,90);
+      const pLng=validCoordinate(parsed.longitude,-180,180);
+
+      if(pLat!==null && pLng!==null){
+        result.lat=pLat;
+        result.lng=pLng;
+        result.gpsSource='EXIF:parse';
+      }
+
+      if(Number.isFinite(Number(parsed.GPSHPositioningError))){
+        result.accuracy=Math.max(0,Number(parsed.GPSHPositioningError));
+      }
+    }catch(err){
+      console.warn('EXIF completo non leggibile',err);
+    }
+
+    // 2) Dedicated exifr GPS parser.
+    // exifr documents gps(file) as the optimized latitude/longitude extractor.
+    if(result.lat===null || result.lng===null){
+      try{
+        const gps=await exifr.gps(file);
+
+        const gLat=validCoordinate(gps?.latitude,-90,90);
+        const gLng=validCoordinate(gps?.longitude,-180,180);
+
+        if(gLat!==null && gLng!==null){
+          result.lat=gLat;
+          result.lng=gLng;
+          result.gpsSource='EXIF:gps';
+        }
+      }catch(err){
+        console.warn('GPS EXIF dedicato non leggibile',err);
+      }
+    }
+  }
+
+  // 3) Browser File metadata is only a FALLBACK for the date.
+  // Never replace an EXIF original date with import time.
+  if(result.capturedAt===null){
+    const fallback=validEpochMs(file?.lastModified);
+
+    if(fallback!==null){
+      result.capturedAt=fallback;
+      result.dateSource='FILE:lastModified';
+    }
+  }
+
+  // Absolute last resort only when browser supplies no useful time at all.
+  if(result.capturedAt===null){
+    result.capturedAt=Date.now();
+    result.dateSource='IMPORT_TIME';
+  }
+
+  return result;
+}
+
 async function handleArchiveImport(e){
   const files=[...(e.target.files||[])];
   if(!files.length)return;
@@ -490,53 +665,15 @@ async function handleArchiveImport(e){
     $('importProgressSub').textContent=file.name;
 
     try{
-      let exif={};
+      // IMPORTANT: read metadata from ORIGINAL file before compression.
+      const originalMeta=await readOriginalPhotoMetadata(file);
 
-      try{
-        if(window.exifr){
-          exif=await exifr.parse(file,{
-            gps:true,
-            tiff:true,
-            exif:true,
-            pick:[
-              'DateTimeOriginal',
-              'CreateDate',
-              'ModifyDate',
-              'latitude',
-              'longitude'
-            ]
-          })||{};
-        }
-      }catch(exifErr){
-        console.warn('EXIF non leggibile',exifErr);
-      }
+      const capturedAt=originalMeta.capturedAt;
+      const lat=originalMeta.lat;
+      const lng=originalMeta.lng;
 
+      // Only after metadata extraction we create the compressed upload image.
       const image=await compress(file,1600,.78);
-
-      const exifDate=
-        exif.DateTimeOriginal||
-        exif.CreateDate||
-        exif.ModifyDate;
-
-      const parsedDate=
-        exifDate instanceof Date
-          ? exifDate.getTime()
-          : (exifDate?Date.parse(exifDate):Date.now());
-
-      const capturedAt=
-        Number.isFinite(parsedDate)
-          ? parsedDate
-          : Date.now();
-
-      const lat=
-        Number.isFinite(Number(exif.latitude))
-          ? Number(exif.latitude)
-          : null;
-
-      const lng=
-        Number.isFinite(Number(exif.longitude))
-          ? Number(exif.longitude)
-          : null;
 
       const rec={
         image,
@@ -544,7 +681,10 @@ async function handleArchiveImport(e){
         originalFileName:file.name||'',
         lat,
         lng,
-        accuracy:0,
+        accuracy:originalMeta.accuracy||0,
+        dateSource:originalMeta.dateSource,
+        gpsSource:originalMeta.gpsSource,
+        originalExifAvailable:!!originalMeta.exifAvailable,
 
         tags:['da classificare'],
         manualTags:[],
@@ -564,12 +704,24 @@ async function handleArchiveImport(e){
         driveFileId:'',
         source:'archive-import',
 
-        schemaVersion:13,
+        schemaVersion:16,
         appVersion:APP_VERSION
       };
 
       await addPhoto(rec);
       saved++;
+
+      console.info(
+        'FM Foto import metadata',
+        file.name,
+        {
+          capturedAt:new Date(capturedAt).toISOString(),
+          dateSource:originalMeta.dateSource,
+          lat,
+          lng,
+          gpsSource:originalMeta.gpsSource
+        }
+      );
 
     }catch(err){
       console.warn('Salvataggio import fallito',file.name,err);
@@ -964,7 +1116,7 @@ function openPhoto(id,all){
   const p=all.find(x=>String(x.id)===String(id)); if(!p)return;
   currentModalPhotoId=String(id); $('modalImg').src=p.image;
   const hasGps=p.lat!==null&&p.lng!==null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng));
-  $('modalMeta').innerHTML=`<strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong><div class="muted">${hasGps?`GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m`:'Posizione non assegnata'}</div><div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
+  $('modalMeta').innerHTML=`<strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong><div class="muted">${p.dateSource?`Data: ${escapeHtml(p.dateSource)}<br>`:''}${hasGps?`GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m${p.gpsSource?` · ${escapeHtml(p.gpsSource)}`:''}`:'Posizione non presente nel file selezionato'}</div><div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
   $('assignCurrentLocationBtn').classList.toggle('hidden',hasGps); renderManualTagEditor(p); $('photoModal').classList.remove('hidden');
 }
 
@@ -1057,7 +1209,7 @@ async function persistManualTags(photo){
 }
 function refreshModalMeta(p){
   const hasGps=p.lat!==null&&p.lng!==null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng));
-  $('modalMeta').innerHTML=`<strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong><div class="muted">${hasGps?`GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m`:'Posizione non assegnata'}</div><div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
+  $('modalMeta').innerHTML=`<strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong><div class="muted">${p.dateSource?`Data: ${escapeHtml(p.dateSource)}<br>`:''}${hasGps?`GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m${p.gpsSource?` · ${escapeHtml(p.gpsSource)}`:''}`:'Posizione non presente nel file selezionato'}</div><div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
   $('assignCurrentLocationBtn').classList.toggle('hidden',hasGps);
 }
 

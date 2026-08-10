@@ -1,16 +1,32 @@
-# FM foto Operatore V2.7.2 — iPhone Import Queue Fix
+# FM Foto Operatore V2.7.3 — iPhone EXIF Fix
 
-Worker richiesto: V2.8 (invariato).
+## Obiettivo
+Correggere data e posizione delle foto importate direttamente dalla galleria smartphone.
 
-Correzioni:
-- import da galleria iPhone salva prima le foto localmente;
-- al termine attende esplicitamente la coda di upload;
-- nuovo pulsante "Avvia caricamento";
-- nuovo pulsante "Riprova errori";
-- blocco anti-doppia coda;
-- una singola foto viene processata una sola volta per ciclo;
-- pausa maggiore tra upload per iOS/Safari;
-- stato AI letto dal Worker: se quota AI esaurita la foto può risultare da classificare ma Drive è comunque sincronizzato;
-- DB v15 non distruttivo.
+## Correzioni
+- exifr passa dal bundle `lite` al bundle `full` 7.1.3;
+- EXIF viene letto sul file ORIGINALE prima della compressione;
+- data in priorità:
+  1. DateTimeOriginal
+  2. CreateDate
+  3. DateTime
+  4. ModifyDate
+  5. File.lastModified
+  6. solo come ultima risorsa: ora di importazione;
+- GPS in priorità:
+  1. parse EXIF completo;
+  2. `exifr.gps(file)` dedicato;
+- coordinate validate;
+- salva `dateSource` e `gpsSource` per diagnostica;
+- Archivio mostra l'origine del dato quando disponibile;
+- DB schema v16 non distruttivo;
+- cache PWA aggiornata a 7.7.3.
 
-Aggiorna solo GitHub/PWA. Non cambiare il Worker V2.8.
+## Limite iPhone/iOS
+Se l'utente, nel selettore Foto di iOS, sceglie di non condividere la posizione,
+il browser riceve il file senza quella metadata. In quel caso FM Foto non può
+ricostruire coordinate assenti e mostrerà "Posizione non presente nel file selezionato".
+
+## Installazione
+Aggiornare SOLO i file GitHub/PWA.
+NON modificare il Worker Cloudflare V2.9.
