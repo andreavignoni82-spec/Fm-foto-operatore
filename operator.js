@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=8;
+const DB_VERSION=9;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.2.0';
+const APP_VERSION='7.3.0';
 
 let db=null;
 let currentPosition=null;
@@ -23,11 +23,18 @@ document.addEventListener('DOMContentLoaded',init);
 async function init(){
   db=await openDB();
   settings=await loadSettings();
+
   $('cameraInput').addEventListener('change',handlePhoto);
-  $('captureBtn').addEventListener('click',handleCaptureTap);
+  bindNavigation();
+  bindModal();
+  renderTagFilters();
 
   await updateCount();
   updateNetworkState();
+
+  setState('ok','Pronto');
+  $('readyTitle').textContent='Pronto allo scatto';
+  $('readySub').textContent='Premi SCATTA FOTO. Dopo lo scatto verrà acquisita automaticamente la posizione.';
 
   window.addEventListener('online',async()=>{
     updateNetworkState();
@@ -35,17 +42,17 @@ async function init(){
   });
   window.addEventListener('offline',updateNetworkState);
 
+  // Tentativo silenzioso, ma non blocca mai il pulsante fotocamera.
   warmLocation();
 
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js?v=7.2.0').catch(()=>{});
+    navigator.serviceWorker.register('./sw.js?v=7.3.0').catch(()=>{});
   }
 
   if(navigator.onLine){
     setTimeout(retryPending,1500);
   }
 }
-
 function openDB(){
   return new Promise((resolve,reject)=>{
     const req=indexedDB.open(DB_NAME,DB_VERSION);
@@ -96,19 +103,7 @@ async function loadSettings(){
 }
 
 function warmLocation(){
-  // Tentativo silenzioso all'avvio. Se iOS/Brave non risponde,
-  // l'utente può comunque premere SCATTA FOTO e la richiesta GPS
-  // verrà fatta dentro il gesto dell'utente.
-  setState('wait','Preparazione…');
-  $('readyTitle').textContent='Pronto';
-  $('readySub').textContent='Premi SCATTA FOTO. Posizione e fotocamera si attivano automaticamente.';
-
-  if(!navigator.geolocation){
-    setState('err','GPS non disponibile');
-    $('readyTitle').textContent='GPS non disponibile';
-    return;
-  }
-
+  if(!navigator.geolocation)return;
   navigator.geolocation.getCurrentPosition(
     pos=>savePosition(pos),
     ()=>{},
@@ -123,10 +118,7 @@ function savePosition(pos){
     accuracy:pos.coords.accuracy,
     capturedAt:Date.now()
   };
-
   setState('ok','Pronto');
-  $('readyTitle').textContent='Pronto allo scatto';
-  $('readySub').textContent=`Posizione acquisita · ±${Math.round(pos.coords.accuracy)} m`;
 }
 
 function acquireLocation(){
@@ -143,67 +135,40 @@ function acquireLocation(){
       },
       err=>{
         let message='Impossibile acquisire la posizione.';
-        if(err && err.code===1) message='Consenti la posizione a questo sito nelle impostazioni del browser.';
-        if(err && err.code===2) message='Posizione temporaneamente non disponibile.';
-        if(err && err.code===3) message='Tempo scaduto durante la ricerca della posizione.';
+        if(err?.code===1)message='Consenti la posizione a questo sito.';
+        if(err?.code===2)message='Posizione temporaneamente non disponibile.';
+        if(err?.code===3)message='Tempo scaduto durante la ricerca della posizione.';
         reject(new Error(message));
       },
-      {
-        enableHighAccuracy:true,
-        timeout:15000,
-        maximumAge:10000
-      }
+      {enableHighAccuracy:true,timeout:15000,maximumAge:10000}
     );
   });
 }
 
-async function handleCaptureTap(){
-  if(isBusy)return;
-
-  const btn=$('captureBtn');
-  btn.disabled=true;
-  setState('wait','Acquisizione GPS…');
-  $('readyTitle').textContent='Acquisisco la posizione…';
-  $('readySub').textContent='Attendi qualche secondo.';
-
-  try{
-    // Richiesta eseguita dentro il tap: più affidabile su iOS/Brave/Safari.
-    await acquireLocation();
-
-    // Appena il GPS è disponibile, apre la fotocamera.
-    $('cameraInput').click();
-  }catch(err){
-    console.warn(err);
-    setState('err','Posizione non disponibile');
-    $('readyTitle').textContent='Posizione necessaria';
-    $('readySub').textContent=String(err?.message||err);
-  }finally{
-    btn.disabled=false;
-  }
-}
-
-function requestLocation(){
-  // Alias mantenuto per compatibilità con eventuali vecchi richiami.
-  return acquireLocation();
-}
+function requestLocation(){return acquireLocation()}
 
 async function handlePhoto(e){
   const file=e.target.files?.[0];
   if(!file||isBusy)return;
 
-  if(!currentPosition){
-    e.target.value='';
-    requestLocation();
-    return;
-  }
-
   isBusy=true;
-  setCaptureBusy(true);
-  showWorking('Elaborazione foto…','Salvataggio sicuro sul dispositivo.');
+  showWorking('Elaborazione foto…','Acquisizione posizione e salvataggio automatico.');
 
   let rec=null;
 
   try{
+    // Safari ha già aperto la fotocamera tramite il label.
+    // Ora possiamo acquisire il GPS senza perdere l'azione fotocamera.
+    try{
+      await acquireLocation();
+    }catch(gpsErr){
+      hideWorking();
+      showSuccess(String(gpsErr?.message||gpsErr));
+      e.target.value='';
+      isBusy=false;
+      return;
+    }
+
     const image=await compress(file,1600,.78);
 
     rec={
@@ -219,7 +184,7 @@ async function handlePhoto(e){
       syncStatus:'pending',
       backendStatus:'pending',
       driveFileId:'',
-      schemaVersion:7,
+      schemaVersion:9,
       appVersion:APP_VERSION
     };
 
@@ -246,8 +211,13 @@ async function handlePhoto(e){
       showSuccess('Foto classificata e archiviata automaticamente.');
     }else{
       hideWorking();
-      showSuccess('Foto salvata. Verrà elaborata automaticamente appena torna la connessione.');
+      showSuccess('Foto salvata. Verrà elaborata appena torna la connessione.');
     }
+
+    // Aggiorna eventuali viste aperte
+    await renderArchive();
+    if(document.getElementById('tagsView').classList.contains('active'))await renderTagGallery();
+    if(document.getElementById('mapView').classList.contains('active'))await renderMap();
 
   }catch(err){
     console.warn('FM foto backend:',err);
@@ -264,11 +234,9 @@ async function handlePhoto(e){
   }finally{
     e.target.value='';
     isBusy=false;
-    setCaptureBusy(false);
     setTimeout(()=>$('successCard').classList.add('hidden'),5000);
   }
 }
-
 async function retryPending(){
   if(!navigator.onLine||!settings.backendEndpoint)return;
 
@@ -400,14 +368,176 @@ function showSuccess(text){
   $('successText').textContent=text;
   $('successCard').classList.remove('hidden');
 }
-function setCaptureBusy(v){
-  const btn=$('captureBtn');
-  if(btn)btn.disabled=v;
-}
 function setState(state,text){
   $('globalDot').className=`status-dot ${state}`;
   $('globalText').textContent=text;
 }
+
+let map=null,markersLayer=null;
+let activeTags=new Set();
+let mapTags=new Set();
+
+function bindNavigation(){
+  document.querySelectorAll('.nav-btn').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.operator-view').forEach(x=>x.classList.remove('active'));
+      $(btn.dataset.view).classList.add('active');
+
+      if(btn.dataset.view==='mapView')await renderMap();
+      if(btn.dataset.view==='tagsView')await renderTagGallery();
+      if(btn.dataset.view==='archiveView')await renderArchive();
+    });
+  });
+}
+
+async function renderArchive(){
+  const photos=await getAllPhotos();
+  const host=$('archiveGallery');
+  if(!host)return;
+  $('archiveEmpty').classList.toggle('hidden',photos.length>0);
+  host.innerHTML=photos.map(photoCardHTML).join('');
+  bindPhotoCards(host,photos);
+}
+
+function renderTagFilters(){
+  const host=$('tagFilters');
+  if(!host)return;
+  host.innerHTML=`<button class="filter-chip active" data-tag="">Tutte</button>`+
+    tagsVoc.map(t=>`<button class="filter-chip" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('');
+
+  host.onclick=async e=>{
+    const b=e.target.closest('.filter-chip');
+    if(!b)return;
+    const tag=b.dataset.tag||'';
+    const allBtn=host.querySelector('[data-tag=""]');
+
+    if(!tag){
+      activeTags.clear();
+      host.querySelectorAll('.filter-chip').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+    }else{
+      allBtn?.classList.remove('active');
+      if(activeTags.has(tag)){activeTags.delete(tag);b.classList.remove('active')}
+      else{activeTags.add(tag);b.classList.add('active')}
+      if(activeTags.size===0)allBtn?.classList.add('active');
+    }
+    await renderTagGallery();
+  };
+}
+
+async function renderTagGallery(){
+  const all=await getAllPhotos();
+  const photos=all.filter(p=>[...activeTags].every(t=>(p.tags||[]).includes(t)));
+  $('tagEmpty').classList.toggle('hidden',photos.length>0);
+  $('tagGallery').innerHTML=photos.map(photoCardHTML).join('');
+  bindPhotoCards($('tagGallery'),all);
+}
+
+function photoCardHTML(p){
+  return `<button class="photo-card" data-id="${p.id}">
+    <img src="${p.image}" alt="Foto cantiere">
+    <div class="overlay">${new Date(p.createdAt).toLocaleDateString('it-IT')}<br>${(p.tags||[]).slice(0,3).map(escapeHtml).join(' · ')}</div>
+  </button>`;
+}
+
+function bindPhotoCards(host,all){
+  host.querySelectorAll('.photo-card').forEach(card=>{
+    card.onclick=()=>openPhoto(Number(card.dataset.id),all);
+  });
+}
+
+function openPhoto(id,all){
+  const p=all.find(x=>x.id===id);
+  if(!p)return;
+  $('modalImg').src=p.image;
+  $('modalMeta').innerHTML=`
+    <strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong>
+    <div class="muted">GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m</div>
+    <div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
+    ${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
+  $('photoModal').classList.remove('hidden');
+}
+
+function bindModal(){
+  $('closePhotoModal').onclick=()=>$('photoModal').classList.add('hidden');
+  $('photoModal').onclick=e=>{if(e.target.id==='photoModal')$('photoModal').classList.add('hidden')};
+}
+
+async function renderMap(){
+  const all=(await getAllPhotos()).filter(p=>Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));
+  const photos=all.filter(p=>[...mapTags].every(t=>(p.tags||[]).includes(t)));
+
+  $('mapEmpty').classList.toggle('hidden',photos.length>0);
+  renderMapFilterBar();
+
+  if(!map){
+    map=L.map('map').setView([45.55,10.2],8);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      maxZoom:19,attribution:'&copy; OpenStreetMap'
+    }).addTo(map);
+    markersLayer=L.layerGroup().addTo(map);
+  }
+
+  setTimeout(()=>map.invalidateSize(),100);
+  markersLayer.clearLayers();
+
+  const groups=groupNearby(photos,25);
+  const bounds=[];
+
+  groups.forEach(g=>{
+    const lat=g.reduce((s,p)=>s+Number(p.lat),0)/g.length;
+    const lng=g.reduce((s,p)=>s+Number(p.lng),0)/g.length;
+    bounds.push([lat,lng]);
+    const first=g[0];
+    const tags=[...new Set(g.flatMap(p=>p.tags||[]))].slice(0,6);
+    L.marker([lat,lng]).addTo(markersLayer).bindPopup(
+      `<strong>${g.length} foto</strong><br>${tags.map(escapeHtml).join(' · ')}<br><img src="${first.image}" style="width:180px;border-radius:8px;margin-top:8px">`
+    );
+  });
+
+  if(bounds.length===1)map.setView(bounds[0],16);
+  else if(bounds.length>1)map.fitBounds(bounds,{padding:[25,25]});
+}
+
+function renderMapFilterBar(){
+  const host=$('mapTagBar');
+  const common=['ringhiera','scala','soppalco','tettoia','parapetto','zincato','verniciato','installato'];
+  host.innerHTML=`<button class="filter-chip ${mapTags.size===0?'active':''}" data-map-tag="">Tutte</button>`+
+    common.map(t=>`<button class="filter-chip ${mapTags.has(t)?'active':''}" data-map-tag="${t}">${t}</button>`).join('');
+
+  host.onclick=async e=>{
+    const b=e.target.closest('[data-map-tag]');
+    if(!b)return;
+    const tag=b.dataset.mapTag;
+    if(!tag)mapTags.clear();
+    else if(mapTags.has(tag))mapTags.delete(tag);
+    else mapTags.add(tag);
+    await renderMap();
+  };
+}
+
+function groupNearby(photos,maxMeters){
+  const groups=[];
+  for(const p of photos){
+    let group=groups.find(g=>distanceMeters(Number(p.lat),Number(p.lng),Number(g[0].lat),Number(g[0].lng))<=maxMeters);
+    if(group)group.push(p);else groups.push([p]);
+  }
+  return groups;
+}
+
+function distanceMeters(lat1,lon1,lat2,lon2){
+  const R=6371000,toRad=d=>d*Math.PI/180;
+  const dLat=toRad(lat2-lat1),dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+
+function escapeHtml(v){
+  return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+}
+
 function $(id){
   return document.getElementById(id);
 }

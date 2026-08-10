@@ -8,8 +8,9 @@
 <title>FM foto</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v=7.2.0">
-<link rel="stylesheet" href="operator.css?v=7.2.0">
+<link rel="stylesheet" href="styles.css?v=7.3.0">
+<link rel="stylesheet" href="operator.css?v=7.3.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 </head>
 <body class="operator-body">
 <header class="fm-header operator-header">
@@ -23,8 +24,8 @@
   </div>
 </header>
 
-<main class="operator-main">
-  <section class="operator-screen">
+<main class="operator-main multi-view-main">
+  <section id="captureView" class="operator-view active">
     <div class="operator-title">
       <h1>Foto cantiere</h1>
       <p>Scatta la foto. Al resto pensa FM foto.</p>
@@ -32,9 +33,12 @@
 
     <div class="fm-card operator-camera-card">
       <div class="operator-camera-icon">📷</div>
-      <div id="readyTitle" class="operator-ready-title">Attendo posizione…</div>
-      <div id="readySub" class="operator-ready-sub">La posizione viene acquisita automaticamente.</div>
-      <button id="captureBtn" class="fm-btn primary operator-capture" type="button">SCATTA FOTO</button>
+      <div id="readyTitle" class="operator-ready-title">Pronto allo scatto</div>
+      <div id="readySub" class="operator-ready-sub">Fotocamera, posizione, AI e archivio lavorano automaticamente.</div>
+
+      <label id="captureLabel" class="fm-btn primary operator-capture" for="cameraInput">
+        SCATTA FOTO
+      </label>
       <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
     </div>
 
@@ -56,7 +60,7 @@
 
     <div id="offlineCard" class="fm-card operator-note hidden">
       <strong>Connessione assente</strong>
-      <small>La foto viene conservata sul dispositivo e sarà sincronizzata appena possibile.</small>
+      <small>La foto resta sul dispositivo e verrà elaborata appena torna la connessione.</small>
     </div>
 
     <div class="operator-counter">
@@ -64,9 +68,54 @@
       <strong id="photoCount">0</strong>
     </div>
   </section>
+
+  <section id="mapView" class="operator-view">
+    <div class="operator-title">
+      <h1>Mappa</h1>
+      <p>Foto raggruppate per posizione.</p>
+    </div>
+    <div id="mapTagBar" class="tag-filters map-filter-bar"></div>
+    <div class="fm-card map-card"><div id="map"></div></div>
+    <div id="mapEmpty" class="fm-card empty hidden">Nessuna foto geolocalizzata.</div>
+  </section>
+
+  <section id="tagsView" class="operator-view">
+    <div class="operator-title">
+      <h1>Tag</h1>
+      <p>Filtra le foto per tipologia.</p>
+    </div>
+    <div id="tagFilters" class="tag-filters"></div>
+    <div id="tagGallery" class="gallery"></div>
+    <div id="tagEmpty" class="fm-card empty hidden">Nessuna foto corrisponde ai filtri.</div>
+  </section>
+
+  <section id="archiveView" class="operator-view">
+    <div class="operator-title">
+      <h1>Archivio</h1>
+      <p>Tutte le fotografie salvate.</p>
+    </div>
+    <div id="archiveGallery" class="gallery"></div>
+    <div id="archiveEmpty" class="fm-card empty hidden">Nessuna foto salvata.</div>
+  </section>
 </main>
 
-<script src="config.js?v=7.2.0"></script>
-<script src="operator.js?v=7.2.0"></script>
+<nav class="bottom-nav operator-nav">
+  <button class="nav-btn active" data-view="captureView"><span>📷</span><small>Scatta</small></button>
+  <button class="nav-btn" data-view="mapView"><span>📍</span><small>Mappa</small></button>
+  <button class="nav-btn" data-view="tagsView"><span>🏷️</span><small>Tag</small></button>
+  <button class="nav-btn" data-view="archiveView"><span>🗂️</span><small>Archivio</small></button>
+</nav>
+
+<div id="photoModal" class="modal hidden">
+  <div class="modal-panel">
+    <button id="closePhotoModal" class="modal-close">×</button>
+    <img id="modalImg" alt="Foto cantiere">
+    <div id="modalMeta" class="modal-meta"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="config.js?v=7.3.0"></script>
+<script src="operator.js?v=7.3.0"></script>
 </body>
 </html>
