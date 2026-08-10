@@ -1,21 +1,14 @@
-# FM foto Operatore V2.7 — Import Queue Resiliente
+# FM foto Operatore V2.7.1 — Queue Loop Fix
 
-Questa versione NON richiede modifiche al Worker V2.6.
+Correzione V2.7:
+- eliminato il loop infinito del pulsante "Riprova non sincronizzate";
+- ogni foto viene tentata al massimo una volta per ogni ciclo della coda;
+- una foto fallita resta in stato ERRORE e non viene ripresa immediatamente;
+- un nuovo tentativo avviene solo premendo di nuovo Riprova;
+- se il backend non conferma driveUploaded, la foto passa a ERRORE anziché tornare pending;
+- pulsante Retry disabilitato mentre una coda è in elaborazione;
+- contatori pending/processing separati correttamente;
+- database v14, migrazione non distruttiva;
+- Worker V2.6 invariato.
 
-Novità:
-- durante import multiplo tutte le foto vengono prima salvate in IndexedDB;
-- AI/Drive partono solo dopo, in una coda separata;
-- elaborazione sequenziale, una foto alla volta;
-- una foto in errore non interrompe le successive;
-- ripresa automatica dopo chiusura browser / refresh / perdita rete;
-- stato persistente: In coda / Elaborazione / Da riprovare / Drive;
-- contatori della coda;
-- barra avanzamento;
-- pulsante "Riprova non sincronizzate";
-- il retry generico non elabora più le foto importate, evitando doppie code;
-- database v13 con migrazione non distruttiva;
-- Worker Cloudflare V2.6 invariato.
-
-Nota:
-le foto vengono considerate al sicuro appena sono state salvate localmente.
-La sincronizzazione può proseguire successivamente.
+Aggiorna solo i file GitHub/PWA.
