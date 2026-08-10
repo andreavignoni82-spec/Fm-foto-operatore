@@ -1,0 +1,22 @@
+
+.operator-body{padding-bottom:0;min-height:100dvh}
+.operator-header{position:relative}
+.operator-global-state{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:750;color:#64748b}
+.operator-main{max-width:620px;margin:0 auto;padding:18px 15px calc(24px + env(safe-area-inset-bottom))}
+.operator-screen{min-height:calc(100dvh - 105px);display:flex;flex-direction:column}
+.operator-title{margin:10px 3px 17px}
+.operator-title h1{margin:0;font-size:28px;letter-spacing:-.03em}
+.operator-title p{margin:5px 0 0;color:#718096;font-size:14px}
+.operator-camera-card{flex:1;min-height:52vh;padding:30px 22px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.operator-camera-icon{width:92px;height:92px;border-radius:24px;background:#eaf3fd;display:grid;place-items:center;font-size:47px;margin-bottom:18px}
+.operator-ready-title{font-size:23px;font-weight:900;color:#172033}
+.operator-ready-sub{font-size:13px;color:#7b8798;margin:7px 0 28px;max-width:330px;line-height:1.4}
+.operator-capture{width:100%;max-width:400px;font-size:20px;padding:20px}
+.operator-capture.disabled{opacity:.45;pointer-events:none}
+.operator-progress,.operator-success,.operator-note{margin-top:12px;padding:15px;display:flex;align-items:center;gap:12px}
+.operator-progress small,.operator-success small,.operator-note small{display:block;color:#7b8798;margin-top:3px;font-size:11px;line-height:1.4}
+.spinner{width:30px;height:30px;border:3px solid #dbeafe;border-top-color:#1976d2;border-radius:50%;animation:spin .8s linear infinite;flex:0 0 auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+.operator-note{background:#fffaf0;border-color:#fde7b0}
+.operator-counter{display:flex;justify-content:space-between;align-items:center;padding:14px 4px 0;color:#718096;font-size:11px}
+.operator-counter strong{font-size:22px;color:#172033}

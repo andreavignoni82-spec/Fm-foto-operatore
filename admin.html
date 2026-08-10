@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#1976d2" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>FM foto Admin</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css?v=5.0.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+</head>
+<body>
+  <header class="fm-header">
+    <div class="fm-brand-wrap">
+      <div class="fm-logo">FM <span>foto</span></div>
+      <div class="fm-subtitle">FAMAFER MANAGER</div>
+    </div>
+    <button id="menuBtn" class="icon-btn" aria-label="Impostazioni">⚙️</button>
+  </header>
+
+  <main class="fm-main">
+    <section id="captureView" class="view active">
+      <div class="page-title">
+        <div>
+          <h1>Foto cantiere</h1>
+          <p>Scatta. Al resto pensa FM foto.</p>
+        </div>
+        <span class="build-pill">TEST 05</span>
+      </div>
+
+      <div id="systemStatus" class="system-strip">
+        <div class="status-item">
+          <span id="gpsDot" class="status-dot wait"></span>
+          <div><b id="gpsTitle">Posizione</b><small id="gpsText">Acquisizione…</small></div>
+        </div>
+        <div class="status-item">
+          <span id="driveDot" class="status-dot offline"></span>
+          <div><b>Drive</b><small id="driveText">Non collegato</small></div>
+        </div>
+      </div>
+
+      <div class="fm-card capture-card">
+        <div class="camera-mark">📷</div>
+        <h2>Pronto allo scatto</h2>
+        <p>Nessun campo da compilare.</p>
+
+        <label class="fm-btn primary capture-button" for="cameraInput">SCATTA FOTO</label>
+        <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
+
+        <div class="microcopy">GPS, data/ora e coda di sincronizzazione vengono registrati automaticamente.</div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="fm-card kpi"><span>Foto dispositivo</span><strong id="photoCount">0</strong></div>
+        <div class="fm-card kpi"><span>Da sincronizzare</span><strong id="pendingCount">0</strong></div>
+      </div>
+
+      <div id="lastResult" class="fm-card result-card hidden">
+        <div class="success-icon">✓</div>
+        <div class="result-body">
+          <strong>Foto acquisita</strong>
+          <div id="lastTags" class="tag-row"></div>
+          <small id="lastSyncInfo">Salvata sul dispositivo.</small>
+        </div>
+      </div>
+    </section>
+
+    <section id="mapView" class="view">
+      <div class="page-title">
+        <div><h1>Mappa</h1><p>Archivio geografico delle realizzazioni.</p></div>
+        <button id="locateBtn" class="fm-btn secondary compact">Centra</button>
+      </div>
+      <div id="mapTagBar" class="tag-filters map-filter-bar"></div><div class="fm-card map-card"><div id="map"></div></div>
+      <div id="mapEmpty" class="fm-card empty hidden">Non ci sono ancora fotografie geolocalizzate.</div>
+    </section>
+
+    <section id="tagsView" class="view">
+      <div class="page-title"><div><h1>Tag</h1><p>Ricerca rapida nell'archivio.</p></div></div>
+      <div id="tagFilters" class="tag-filters"></div>
+      <div id="gallery" class="gallery"></div>
+      <div id="galleryEmpty" class="fm-card empty hidden">Nessuna foto corrisponde ai filtri.</div>
+    </section>
+
+    <section id="syncView" class="view">
+      <div class="page-title"><div><h1>Sincronizzazione</h1><p>Drive e classificazione automatica.</p></div></div>
+
+      <div class="fm-card integration-card">
+        <div>
+          <h3>Google Drive</h3>
+          <p id="drivePanelText">Collega l'account autorizzato per inviare automaticamente le nuove foto.</p>
+        </div>
+        <div class="action-row">
+          <button id="driveConnectBtn" class="fm-btn primary compact">Collega Drive</button>
+          <button id="syncNowBtn" class="fm-btn secondary compact">Sincronizza ora</button>
+        </div>
+      </div>
+
+      <div class="fm-card integration-card">
+        <div>
+          <h3>Classificazione AI</h3>
+          <p id="aiPanelText">AI reale disponibile quando viene configurato l’endpoint. Senza endpoint, FM foto salva comunque la foto ma assegna solo il tag provvisorio “da classificare”.</p>
+        </div>
+        <div class="status-line"><span id="aiDot" class="status-dot offline"></span><span id="aiStatus">Fallback locale attivo</span></div>
+      </div>
+
+      <div class="fm-card integration-card">
+        <h3>Protezione dati locali</h3>
+        <p>Gli aggiornamenti dell'app non cancellano IndexedDB. Il database usa migrazioni incrementali e conserva le foto già presenti.</p>
+        <div class="action-row">
+          <button id="exportBtn" class="fm-btn secondary compact">Esporta backup JSON</button>
+        </div>
+      </div>
+
+      <div class="fm-card queue-card">
+        <h3>Coda</h3>
+        <div id="queueList" class="queue-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button data-view="captureView" class="nav-btn active"><span>📷</span><small>Scatta</small></button>
+    <button data-view="mapView" class="nav-btn"><span>📍</span><small>Mappa</small></button>
+    <button data-view="tagsView" class="nav-btn"><span>🏷️</span><small>Tag</small></button>
+    <button data-view="syncView" class="nav-btn"><span>☁️</span><small>Sync</small></button>
+  </nav>
+
+  <div id="settingsPanel" class="drawer hidden">
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <div class="drawer-panel">
+      <div class="drawer-head"><div><b>FM foto</b><small>Configurazione amministratore</small></div><button class="icon-btn" data-close-drawer>×</button></div>
+      <div class="field">
+        <label>Google OAuth Client ID</label>
+        <input id="clientIdInput" type="text" placeholder="...apps.googleusercontent.com">
+      </div>
+      <div class="field">
+        <label>Cartella Drive principale (ID)</label>
+        <input id="driveRootInput" type="text" placeholder="ID cartella">
+      </div>
+      <div class="field">
+        <label>Endpoint AI opzionale</label>
+        <input id="aiEndpointInput" type="url" placeholder="https://...">
+        <small>Endpoint server-side che riceve l'immagine e restituisce JSON con tags.</small>
+      </div>
+      <button id="saveSettingsBtn" class="fm-btn primary">Salva impostazioni</button>
+      <p class="drawer-note">Le impostazioni non vengono mostrate agli operai durante l'uso normale.</p>
+    </div>
+  </div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-panel">
+      <button id="closeModal" class="modal-close">×</button>
+      <img id="modalImg" alt="Foto cantiere">
+      <div id="modalMeta" class="modal-meta"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="config.js?v=5.0.0"></script>
+  <script src="app.js?v=5.0.0"></script>
+</body>
+</html>

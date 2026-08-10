@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1976d2">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>FM foto</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="styles.css?v=6.0.0">
+<link rel="stylesheet" href="operator.css?v=6.0.0">
+</head>
+<body class="operator-body">
+<header class="fm-header operator-header">
+  <div class="fm-brand-wrap">
+    <div class="fm-logo">FM <span>foto</span></div>
+    <div class="fm-subtitle">FAMAFER</div>
+  </div>
+  <div class="operator-global-state">
+    <span id="globalDot" class="status-dot wait"></span>
+    <span id="globalText">Preparazione…</span>
+  </div>
+</header>
+
+<main class="operator-main">
+  <section class="operator-screen">
+    <div class="operator-title">
+      <h1>Foto cantiere</h1>
+      <p>Scatta la foto. Al resto pensa FM foto.</p>
+    </div>
+
+    <div class="fm-card operator-camera-card">
+      <div class="operator-camera-icon">📷</div>
+      <div id="readyTitle" class="operator-ready-title">Attendo posizione…</div>
+      <div id="readySub" class="operator-ready-sub">La posizione viene acquisita automaticamente.</div>
+      <label id="captureLabel" class="fm-btn primary operator-capture disabled" for="cameraInput">SCATTA FOTO</label>
+      <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden disabled>
+    </div>
+
+    <div id="workingCard" class="fm-card operator-progress hidden">
+      <div class="spinner"></div>
+      <div>
+        <strong id="workingTitle">Elaborazione foto…</strong>
+        <small id="workingSub">Salvataggio e classificazione automatica.</small>
+      </div>
+    </div>
+
+    <div id="successCard" class="fm-card operator-success hidden">
+      <div class="success-icon">✓</div>
+      <div>
+        <strong>Foto acquisita</strong>
+        <small id="successText">Salvata correttamente.</small>
+      </div>
+    </div>
+
+    <div id="offlineCard" class="fm-card operator-note hidden">
+      <strong>Connessione assente</strong>
+      <small>La foto viene conservata sul dispositivo e sarà sincronizzata appena possibile.</small>
+    </div>
+
+    <div class="operator-counter">
+      <span>Foto salvate sul dispositivo</span>
+      <strong id="photoCount">0</strong>
+    </div>
+  </section>
+</main>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="config.js?v=6.0.0"></script>
+<script src="operator.js?v=6.0.0"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "FM foto",
+  "short_name": "FM foto",
+  "description": "Archivio fotografico geolocalizzato FAMAFER",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f7fa",
+  "theme_color": "#1976d2",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
