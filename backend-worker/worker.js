@@ -240,9 +240,15 @@ export default{
       return json({
         service:"FM foto backend",
         status:"online",
-        version:"2.0",
+        version:"2.1",
         ai:true,
-        driveBackend:true
+        driveBackend:true,
+        config:{
+          clientId:!!env.GOOGLE_CLIENT_ID,
+          clientSecret:!!env.GOOGLE_CLIENT_SECRET,
+          refreshToken:!!env.GOOGLE_REFRESH_TOKEN,
+          driveFolder:!!env.GOOGLE_DRIVE_FOLDER_ID
+        }
       });
     }
 
@@ -251,7 +257,7 @@ export default{
         const token=await googleAccessToken(env);
         const r=await driveRequest(
           token,
-          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(env.DRIVE_ROOT_FOLDER_ID)}?fields=id,name,mimeType,trashed`
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(env.GOOGLE_DRIVE_FOLDER_ID)}?fields=id,name,mimeType,trashed`
         );
         const folder=await r.json();
 
@@ -274,6 +280,17 @@ export default{
     }
 
     try{
+      if(!env.GOOGLE_CLIENT_ID ||
+         !env.GOOGLE_CLIENT_SECRET ||
+         !env.GOOGLE_REFRESH_TOKEN ||
+         !env.GOOGLE_DRIVE_FOLDER_ID){
+        return json({
+          ok:false,
+          error:"BACKEND_NOT_CONFIGURED",
+          message:"Mancano una o più variabili Google nel Worker."
+        },500);
+      }
+
       const input=await request.json();
 
       if(!input.image||!String(input.image).startsWith("data:image/")){
@@ -286,7 +303,7 @@ export default{
 
       const uploaded=await uploadPhoto(
         token,
-        env.DRIVE_ROOT_FOLDER_ID,
+        env.GOOGLE_DRIVE_FOLDER_ID,
         input,
         classification
       );
