@@ -8,8 +8,8 @@
 <title>FM foto</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v=7.3.0">
-<link rel="stylesheet" href="operator.css?v=7.3.0">
+<link rel="stylesheet" href="styles.css?v=7.5.0">
+<link rel="stylesheet" href="operator.css?v=7.5.0">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 </head>
 <body class="operator-body">
@@ -72,7 +72,7 @@
   <section id="mapView" class="operator-view">
     <div class="operator-title">
       <h1>Mappa</h1>
-      <p>Foto raggruppate per posizione.</p>
+      <p>Tutte le foto FAMAFER raggruppate per posizione.</p>
     </div>
     <div id="mapTagBar" class="tag-filters map-filter-bar"></div>
     <div class="fm-card map-card"><div id="map"></div></div>
@@ -92,7 +92,7 @@
   <section id="archiveView" class="operator-view">
     <div class="operator-title">
       <h1>Archivio</h1>
-      <p>Tutte le fotografie salvate.</p>
+      <p>Tutte le fotografie FAMAFER, anche degli altri operatori.</p>
     </div>
     <div id="archiveGallery" class="gallery"></div>
     <div id="archiveEmpty" class="fm-card empty hidden">Nessuna foto salvata.</div>
@@ -111,11 +111,23 @@
     <button id="closePhotoModal" class="modal-close">×</button>
     <img id="modalImg" alt="Foto cantiere">
     <div id="modalMeta" class="modal-meta"></div>
+    <div class="manual-tag-panel">
+      <div class="manual-tag-head">
+        <strong>Tag manuali</strong>
+        <small>Aggiungi o correggi i tag della foto.</small>
+      </div>
+      <div id="manualTagQuick" class="tag-filters manual-tag-quick"></div>
+      <div class="manual-tag-custom">
+        <input id="manualTagInput" type="text" maxlength="30" placeholder="Nuovo tag">
+        <button id="addManualTagBtn" class="fm-btn primary compact" type="button">Aggiungi</button>
+      </div>
+      <div id="manualTagList" class="tag-row manual-tag-list"></div>
+    </div>
   </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script src="config.js?v=7.3.0"></script>
-<script src="operator.js?v=7.3.0"></script>
+<script src="config.js?v=7.5.0"></script>
+<script src="operator.js?v=7.5.0"></script>
 </body>
 </html>

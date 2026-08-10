@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=9;
+const DB_VERSION=11;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.3.0';
+const APP_VERSION='7.5.0';
 
 let db=null;
 let currentPosition=null;
@@ -46,7 +46,7 @@ async function init(){
   warmLocation();
 
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js?v=7.3.0').catch(()=>{});
+    navigator.serviceWorker.register('./sw.js?v=7.5.0').catch(()=>{});
   }
 
   if(navigator.onLine){
@@ -95,6 +95,43 @@ function putPhoto(v){return reqPromise(store(STORE,'readwrite').put(v))}
 function getAllPhotos(){
   return reqPromise(store(STORE).getAll())
     .then(a=>a.sort((x,y)=>y.createdAt-x.createdAt));
+}
+
+
+async function fetchSharedArchive(force=false){
+  const now=Date.now();
+  if(!force && sharedArchiveCache.length && (now-sharedArchiveFetchedAt)<30000) return sharedArchiveCache;
+  if(!navigator.onLine || !settings.backendEndpoint) return sharedArchiveCache;
+
+  const res=await fetch(settings.backendEndpoint.replace(/\/$/,'')+'/archive');
+  const text=await res.text();
+  let data;
+  try{data=JSON.parse(text)}catch{throw new Error(`Archivio backend ${res.status}: ${text.slice(0,200)}`)}
+  if(!res.ok||!data.ok) throw new Error(data.message||data.error||`Archivio backend ${res.status}`);
+
+  sharedArchiveCache=(data.photos||[]).map(p=>({
+    id:`remote:${p.driveFileId}`,
+    driveFileId:p.driveFileId,
+    image:p.photoUrl,
+    createdAt:Number(p.capturedAt)||Date.parse(p.createdTime)||0,
+    lat:Number(p.lat), lng:Number(p.lng), accuracy:Number(p.accuracy)||0,
+    tags:Array.isArray(p.tags)?p.tags:[],
+    manualTags:Array.isArray(p.manualTags)?p.manualTags:[],
+    aiSummary:p.summary||'',
+    aiStatus:'classified', syncStatus:'synced', backendStatus:'completed', remote:true
+  })).sort((a,b)=>b.createdAt-a.createdAt);
+
+  sharedArchiveFetchedAt=now;
+  return sharedArchiveCache;
+}
+
+async function getUnifiedPhotos(forceRemote=false){
+  const local=await getAllPhotos();
+  let remote=[];
+  try{remote=await fetchSharedArchive(forceRemote)}catch(err){console.warn('Archivio condiviso non disponibile',err)}
+  const remoteIds=new Set(remote.map(p=>p.driveFileId).filter(Boolean));
+  const localOnly=local.filter(p=>!p.driveFileId || !remoteIds.has(p.driveFileId));
+  return [...remote,...localOnly].sort((a,b)=>b.createdAt-a.createdAt);
 }
 
 async function loadSettings(){
@@ -178,6 +215,7 @@ async function handlePhoto(e){
       lng:currentPosition.lng,
       accuracy:currentPosition.accuracy,
       tags:['da classificare'],
+      manualTags:[],
       aiStatus:'pending',
       aiConfidence:null,
       aiSummary:'',
@@ -196,7 +234,8 @@ async function handlePhoto(e){
 
       const result=await sendToBackend(rec);
 
-      rec.tags=normalizeTags(result.tags||[]);
+      const aiTags=normalizeTags(result.tags||[]);
+      rec.tags=normalizeTags([...(aiTags||[]),...(rec.manualTags||[])]);
       rec.aiStatus='classified';
       rec.aiConfidence=Number.isFinite(Number(result.confidence))?Number(result.confidence):null;
       rec.aiSummary=String(result.summary||'').slice(0,280);
@@ -206,6 +245,7 @@ async function handlePhoto(e){
       rec.syncedAt=result.driveUploaded?Date.now():null;
       rec.lastError='';
       await putPhoto(rec);
+      sharedArchiveFetchedAt=0;
 
       hideWorking();
       showSuccess('Foto classificata e archiviata automaticamente.');
@@ -247,7 +287,8 @@ async function retryPending(){
     try{
       const result=await sendToBackend(rec);
 
-      rec.tags=normalizeTags(result.tags||rec.tags||[]);
+      const aiTags=normalizeTags(result.tags||rec.tags||[]);
+      rec.tags=normalizeTags([...(aiTags||[]),...(rec.manualTags||[])]);
       rec.aiStatus='classified';
       rec.aiConfidence=Number.isFinite(Number(result.confidence))?Number(result.confidence):rec.aiConfidence;
       rec.aiSummary=String(result.summary||rec.aiSummary||'').slice(0,280);
@@ -257,6 +298,7 @@ async function retryPending(){
       rec.syncedAt=result.driveUploaded?Date.now():rec.syncedAt;
       rec.lastError='';
       await putPhoto(rec);
+      sharedArchiveFetchedAt=0;
     }catch(err){
       rec.backendStatus='error';
       rec.lastError=String(err?.message||err);
@@ -282,7 +324,8 @@ async function sendToBackend(rec){
         lat:rec.lat,
         lng:rec.lng,
         accuracy:rec.accuracy,
-        allowedTags:tagsVoc
+        allowedTags:tagsVoc,
+        manualTags:rec.manualTags||[]
       })
     }
   );
@@ -373,6 +416,9 @@ function setState(state,text){
   $('globalText').textContent=text;
 }
 
+let currentModalPhotoId=null;
+let sharedArchiveCache=[];
+let sharedArchiveFetchedAt=0;
 let map=null,markersLayer=null;
 let activeTags=new Set();
 let mapTags=new Set();
@@ -393,13 +439,14 @@ function bindNavigation(){
 }
 
 async function renderArchive(){
-  const photos=await getAllPhotos();
+  const photos=await getUnifiedPhotos(true);
   const host=$('archiveGallery');
   if(!host)return;
   $('archiveEmpty').classList.toggle('hidden',photos.length>0);
   host.innerHTML=photos.map(photoCardHTML).join('');
   bindPhotoCards(host,photos);
 }
+
 
 function renderTagFilters(){
   const host=$('tagFilters');
@@ -428,15 +475,16 @@ function renderTagFilters(){
 }
 
 async function renderTagGallery(){
-  const all=await getAllPhotos();
+  const all=await getUnifiedPhotos();
   const photos=all.filter(p=>[...activeTags].every(t=>(p.tags||[]).includes(t)));
   $('tagEmpty').classList.toggle('hidden',photos.length>0);
   $('tagGallery').innerHTML=photos.map(photoCardHTML).join('');
   bindPhotoCards($('tagGallery'),all);
 }
 
+
 function photoCardHTML(p){
-  return `<button class="photo-card" data-id="${p.id}">
+  return `<button class="photo-card" data-id="${escapeHtml(p.id)}">
     <img src="${p.image}" alt="Foto cantiere">
     <div class="overlay">${new Date(p.createdAt).toLocaleDateString('it-IT')}<br>${(p.tags||[]).slice(0,3).map(escapeHtml).join(' · ')}</div>
   </button>`;
@@ -444,79 +492,182 @@ function photoCardHTML(p){
 
 function bindPhotoCards(host,all){
   host.querySelectorAll('.photo-card').forEach(card=>{
-    card.onclick=()=>openPhoto(Number(card.dataset.id),all);
+    card.onclick=()=>openPhoto(card.dataset.id,all);
   });
 }
 
 function openPhoto(id,all){
-  const p=all.find(x=>x.id===id);
+  const p=all.find(x=>String(x.id)===String(id));
   if(!p)return;
+
+  currentModalPhotoId=String(id);
+
   $('modalImg').src=p.image;
   $('modalMeta').innerHTML=`
     <strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong>
     <div class="muted">GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m</div>
     <div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
     ${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
+
+  renderManualTagEditor(p);
   $('photoModal').classList.remove('hidden');
 }
 
+function renderManualTagEditor(photo){
+  const quick=['ringhiera','scala','soppalco','tettoia','parapetto','cancello','recinzione','passerella','grigliato','zincato','verniciato','installato'];
+
+  $('manualTagQuick').innerHTML=quick.map(t=>{
+    const active=(photo.manualTags||[]).includes(t);
+    return `<button class="filter-chip ${active?'active':''}" data-quick-manual="${escapeHtml(t)}">${escapeHtml(t)}</button>`;
+  }).join('');
+
+  $('manualTagList').innerHTML=(photo.manualTags||[]).map(t=>
+    `<span class="manual-tag-chip">${escapeHtml(t)} <button type="button" data-remove-manual="${escapeHtml(t)}">×</button></span>`
+  ).join('');
+
+  $('manualTagQuick').onclick=async e=>{
+    const b=e.target.closest('[data-quick-manual]');
+    if(!b)return;
+    await toggleManualTag(photo.id,b.dataset.quickManual);
+  };
+
+  $('manualTagList').onclick=async e=>{
+    const b=e.target.closest('[data-remove-manual]');
+    if(!b)return;
+    await removeManualTag(photo.id,b.dataset.removeManual);
+  };
+}
+
+async function toggleManualTag(photoId,tag){
+  const p=await resolvePhoto(photoId); if(!p)return;
+  p.manualTags=Array.isArray(p.manualTags)?p.manualTags:[];
+  if(p.manualTags.includes(tag)) p.manualTags=p.manualTags.filter(x=>x!==tag);
+  else p.manualTags=normalizeTags([...p.manualTags,tag]);
+  p.tags=mergeDisplayTags(p.tags,p.manualTags);
+  await persistManualTags(p);
+  renderManualTagEditor(p); refreshModalMeta(p); await refreshVisibleViews();
+}
+
+
+async function addCustomManualTag(){
+  const raw=$('manualTagInput').value.trim().toLowerCase();
+  if(!raw||currentModalPhotoId==null)return;
+  const clean=raw.replace(/\s+/g,' ').slice(0,30);
+  const p=await resolvePhoto(currentModalPhotoId); if(!p)return;
+  p.manualTags=normalizeTags([...(p.manualTags||[]),clean]);
+  p.tags=mergeDisplayTags(p.tags,p.manualTags);
+  await persistManualTags(p);
+  $('manualTagInput').value='';
+  renderManualTagEditor(p); refreshModalMeta(p); await refreshVisibleViews();
+}
+
+
+async function removeManualTag(photoId,tag){
+  const p=await resolvePhoto(photoId); if(!p)return;
+  p.manualTags=(p.manualTags||[]).filter(x=>x!==tag);
+  p.tags=(p.tags||[]).filter(x=>x!==tag);
+  await persistManualTags(p);
+  renderManualTagEditor(p); refreshModalMeta(p); await refreshVisibleViews();
+}
+
+async function resolvePhoto(photoId){
+  const all=await getUnifiedPhotos();
+  return all.find(x=>String(x.id)===String(photoId))||null;
+}
+function mergeDisplayTags(tags,manualTags){
+  return normalizeTags([...(tags||[]),...(manualTags||[])]);
+}
+async function persistManualTags(photo){
+  if(photo.remote || photo.driveFileId){
+    if(!navigator.onLine)throw new Error('Connessione necessaria per modificare un tag condiviso.');
+    if(!photo.driveFileId)throw new Error('File Drive non disponibile.');
+    const res=await fetch(settings.backendEndpoint.replace(/\/$/,'')+'/update-tags',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({driveFileId:photo.driveFileId,manualTags:photo.manualTags||[]})
+    });
+    const text=await res.text(); let data;
+    try{data=JSON.parse(text)}catch{throw new Error(text.slice(0,200))}
+    if(!res.ok||!data.ok)throw new Error(data.message||data.error||'Aggiornamento tag fallito');
+    photo.tags=data.tags||photo.tags; photo.manualTags=data.manualTags||photo.manualTags;
+    sharedArchiveFetchedAt=0; await fetchSharedArchive(true);
+  }else{
+    const local=await getAllPhotos();
+    const rec=local.find(x=>String(x.id)===String(photo.id));
+    if(rec){
+      rec.manualTags=photo.manualTags||[]; rec.tags=photo.tags||[];
+      rec.backendStatus='pending'; rec.syncStatus='pending'; await putPhoto(rec);
+    }
+  }
+}
+function refreshModalMeta(p){
+  $('modalMeta').innerHTML=`
+    <strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong>
+    <div class="muted">GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m</div>
+    <div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
+    ${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
+}
+
+
+async function refreshVisibleViews(){
+  await updateCount();
+  if($('archiveView').classList.contains('active'))await renderArchive();
+  if($('tagsView').classList.contains('active'))await renderTagGallery();
+  if($('mapView').classList.contains('active'))await renderMap();
+}
+
 function bindModal(){
-  $('closePhotoModal').onclick=()=>$('photoModal').classList.add('hidden');
-  $('photoModal').onclick=e=>{if(e.target.id==='photoModal')$('photoModal').classList.add('hidden')};
+  $('closePhotoModal').onclick=()=>{$('photoModal').classList.add('hidden');currentModalPhotoId=null};
+  $('photoModal').onclick=e=>{if(e.target.id==='photoModal'){$('photoModal').classList.add('hidden');currentModalPhotoId=null}};
+  $('addManualTagBtn').onclick=addCustomManualTag;
+  $('manualTagInput').addEventListener('keydown',e=>{if(e.key==='Enter')addCustomManualTag()});
 }
 
 async function renderMap(){
-  const all=(await getAllPhotos()).filter(p=>Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));
+  const all=(await getUnifiedPhotos()).filter(p=>Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));
   const photos=all.filter(p=>[...mapTags].every(t=>(p.tags||[]).includes(t)));
-
   $('mapEmpty').classList.toggle('hidden',photos.length>0);
-  renderMapFilterBar();
+  renderMapFilterBar(all);
 
   if(!map){
     map=L.map('map').setView([45.55,10.2],8);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      maxZoom:19,attribution:'&copy; OpenStreetMap'
-    }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
     markersLayer=L.layerGroup().addTo(map);
   }
+  setTimeout(()=>map.invalidateSize(),100); markersLayer.clearLayers();
 
-  setTimeout(()=>map.invalidateSize(),100);
-  markersLayer.clearLayers();
-
-  const groups=groupNearby(photos,25);
-  const bounds=[];
-
+  const groups=groupNearby(photos,25),bounds=[];
   groups.forEach(g=>{
     const lat=g.reduce((s,p)=>s+Number(p.lat),0)/g.length;
     const lng=g.reduce((s,p)=>s+Number(p.lng),0)/g.length;
     bounds.push([lat,lng]);
-    const first=g[0];
-    const tags=[...new Set(g.flatMap(p=>p.tags||[]))].slice(0,6);
+    const first=g[0],tags=[...new Set(g.flatMap(p=>p.tags||[]))].slice(0,8);
     L.marker([lat,lng]).addTo(markersLayer).bindPopup(
-      `<strong>${g.length} foto</strong><br>${tags.map(escapeHtml).join(' · ')}<br><img src="${first.image}" style="width:180px;border-radius:8px;margin-top:8px">`
+      `<strong>${g.length} foto</strong><br>${tags.map(escapeHtml).join(' · ')}<br>`+
+      `<img src="${first.image}" style="width:180px;border-radius:8px;margin-top:8px">`
     );
   });
-
   if(bounds.length===1)map.setView(bounds[0],16);
   else if(bounds.length>1)map.fitBounds(bounds,{padding:[25,25]});
 }
 
-function renderMapFilterBar(){
-  const host=$('mapTagBar');
-  const common=['ringhiera','scala','soppalco','tettoia','parapetto','zincato','verniciato','installato'];
-  host.innerHTML=`<button class="filter-chip ${mapTags.size===0?'active':''}" data-map-tag="">Tutte</button>`+
-    common.map(t=>`<button class="filter-chip ${mapTags.has(t)?'active':''}" data-map-tag="${t}">${t}</button>`).join('');
 
-  host.onclick=async e=>{
-    const b=e.target.closest('[data-map-tag]');
-    if(!b)return;
+function renderMapFilterBar(allPhotos=[]){
+  const host=$('mapTagBar');
+  const allTags=[...new Set(
+    allPhotos.flatMap(p=>p.tags||[]).map(t=>String(t).trim().toLowerCase()).filter(Boolean)
+  )].sort((a,b)=>a.localeCompare(b,'it'));
+
+  host.innerHTML=`<button class="filter-chip ${mapTags.size===0?'active':''}" data-map-tag="">Tutte</button>`+
+    allTags.map(t=>`<button class="filter-chip ${mapTags.has(t)?'active':''}" data-map-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('');
+
+  host.onclick=async ev=>{
+    const b=ev.target.closest('[data-map-tag]'); if(!b)return;
     const tag=b.dataset.mapTag;
-    if(!tag)mapTags.clear();
-    else if(mapTags.has(tag))mapTags.delete(tag);
-    else mapTags.add(tag);
+    if(!tag)mapTags.clear(); else if(mapTags.has(tag))mapTags.delete(tag); else mapTags.add(tag);
     await renderMap();
   };
 }
+
 
 function groupNearby(photos,maxMeters){
   const groups=[];
