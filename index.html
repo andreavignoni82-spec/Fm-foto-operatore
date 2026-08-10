@@ -8,8 +8,8 @@
 <title>FM foto</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v=7.5.0">
-<link rel="stylesheet" href="operator.css?v=7.5.0">
+<link rel="stylesheet" href="styles.css?v=7.6.0">
+<link rel="stylesheet" href="operator.css?v=7.6.0">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 </head>
 <body class="operator-body">
@@ -94,6 +94,15 @@
       <h1>Archivio</h1>
       <p>Tutte le fotografie FAMAFER, anche degli altri operatori.</p>
     </div>
+    <div class="archive-tools">
+      <label class="fm-btn primary archive-import-btn" for="archiveImportInput">＋ Importa foto</label>
+      <input id="archiveImportInput" type="file" accept="image/*" multiple hidden>
+      <button id="missingGpsBtn" class="fm-btn secondary compact" type="button">Senza posizione</button>
+    </div>
+    <div id="importProgress" class="fm-card operator-progress hidden">
+      <div class="spinner"></div>
+      <div><strong id="importProgressTitle">Importazione…</strong><small id="importProgressSub">Preparazione foto.</small></div>
+    </div>
     <div id="archiveGallery" class="gallery"></div>
     <div id="archiveEmpty" class="fm-card empty hidden">Nessuna foto salvata.</div>
   </section>
@@ -122,12 +131,14 @@
         <button id="addManualTagBtn" class="fm-btn primary compact" type="button">Aggiungi</button>
       </div>
       <div id="manualTagList" class="tag-row manual-tag-list"></div>
+      <button id="assignCurrentLocationBtn" class="fm-btn secondary compact location-assign-btn hidden" type="button">📍 Assegna posizione attuale</button>
     </div>
   </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script src="config.js?v=7.5.0"></script>
-<script src="operator.js?v=7.5.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+<script src="config.js?v=7.6.0"></script>
+<script src="operator.js?v=7.6.0"></script>
 </body>
 </html>

@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=11;
+const DB_VERSION=12;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.5.0';
+const APP_VERSION='7.6.0';
 
 let db=null;
 let currentPosition=null;
@@ -10,12 +10,13 @@ let settings={};
 let isBusy=false;
 
 const tagsVoc=[
- 'ringhiera','scala','soppalco','tettoia','pensilina','parapetto',
- 'carpenteria','carpenteria strutturale','capannone','cancello','recinzione',
- 'grigliato','passerella','trave','pilastro','piastre','bulloni','gradini',
- 'acciaio','inox','alluminio','zincato','verniciato','grezzo',
- 'interno','esterno','montaggio','installato','completato','dettaglio',
- 'copertura','facciata','struttura','manufatto metallico'
+ 'cancello','recinzione','recinzione in lamiera','recinzione inox','recinzione zincata','recinzione verniciata','recinzione a doghe','recinzione grigliata',
+ 'ringhiera','parapetto','scala','soppalco','tettoia','pensilina','passerella','grigliato','carpenteria strutturale','trave','pilastro','capannone',
+ 'copertura','facciata','serramento','porta','portone','finestra','vetrata','pavimentazione','rivestimento','muro','muratura','calcestruzzo',
+ 'legno','acciaio','inox','alluminio','vetro','lamiera','pietra','laterizio','plastica','zincato','verniciato','satinato','lucido','grezzo','corten',
+ 'nero','bianco','grigio','interno','esterno','installato','montaggio','completato','dettaglio','cantiere','impianto elettrico','impianto idraulico',
+ 'illuminazione','quadro elettrico','tubazione','macchinario','attrezzatura','veicolo','arredo','mobile','tavolo','sedia','scaffalatura','giardino','verde',
+ 'marciapiede','strada','segnaletica','cartellonistica','edificio','abitazione','industriale','commerciale','artigianale','moderno','tradizionale'
 ];
 
 document.addEventListener('DOMContentLoaded',init);
@@ -28,6 +29,9 @@ async function init(){
   bindNavigation();
   bindModal();
   renderTagFilters();
+  $('archiveImportInput').addEventListener('change',handleArchiveImport);
+  $('missingGpsBtn').addEventListener('click',async()=>{showMissingGpsOnly=!showMissingGpsOnly;$('missingGpsBtn').classList.toggle('primary',showMissingGpsOnly);await renderArchive();});
+  $('assignCurrentLocationBtn').addEventListener('click',assignCurrentLocationToOpenPhoto);
 
   await updateCount();
   updateNetworkState();
@@ -46,7 +50,7 @@ async function init(){
   warmLocation();
 
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js?v=7.5.0').catch(()=>{});
+    navigator.serviceWorker.register('./sw.js?v=7.6.0').catch(()=>{});
   }
 
   if(navigator.onLine){
@@ -114,7 +118,7 @@ async function fetchSharedArchive(force=false){
     driveFileId:p.driveFileId,
     image:p.photoUrl,
     createdAt:Number(p.capturedAt)||Date.parse(p.createdTime)||0,
-    lat:Number(p.lat), lng:Number(p.lng), accuracy:Number(p.accuracy)||0,
+    lat:(p.lat===null||p.lat===''||typeof p.lat==='undefined')?null:Number(p.lat), lng:(p.lng===null||p.lng===''||typeof p.lng==='undefined')?null:Number(p.lng), accuracy:Number(p.accuracy)||0,
     tags:Array.isArray(p.tags)?p.tags:[],
     manualTags:Array.isArray(p.manualTags)?p.manualTags:[],
     aiSummary:p.summary||'',
@@ -325,7 +329,8 @@ async function sendToBackend(rec){
         lng:rec.lng,
         accuracy:rec.accuracy,
         allowedTags:tagsVoc,
-        manualTags:rec.manualTags||[]
+        manualTags:rec.manualTags||[],
+        source:rec.source||'camera'
       })
     }
   );
@@ -419,6 +424,7 @@ function setState(state,text){
 let currentModalPhotoId=null;
 let sharedArchiveCache=[];
 let sharedArchiveFetchedAt=0;
+let showMissingGpsOnly=false;
 let map=null,markersLayer=null;
 let activeTags=new Set();
 let mapTags=new Set();
@@ -438,13 +444,52 @@ function bindNavigation(){
   });
 }
 
+async function handleArchiveImport(e){
+  const files=[...(e.target.files||[])]; if(!files.length)return;
+  $('importProgress').classList.remove('hidden'); let ok=0,failed=0;
+  for(let i=0;i<files.length;i++){
+    const file=files[i]; $('importProgressTitle').textContent=`Importazione ${i+1}/${files.length}`; $('importProgressSub').textContent=file.name;
+    try{
+      let exif={};
+      try{if(window.exifr){exif=await exifr.parse(file,{gps:true,tiff:true,exif:true,pick:['DateTimeOriginal','CreateDate','ModifyDate','latitude','longitude']})||{}}}catch(err){console.warn('EXIF',err)}
+      const image=await compress(file,1600,.78);
+      const exifDate=exif.DateTimeOriginal||exif.CreateDate||exif.ModifyDate;
+      const capturedAt=exifDate instanceof Date?exifDate.getTime():(exifDate?Date.parse(exifDate):Date.now());
+      const lat=Number.isFinite(Number(exif.latitude))?Number(exif.latitude):null;
+      const lng=Number.isFinite(Number(exif.longitude))?Number(exif.longitude):null;
+      const rec={image,createdAt:Number.isFinite(capturedAt)?capturedAt:Date.now(),lat,lng,accuracy:0,tags:['da classificare'],manualTags:[],aiStatus:'pending',aiConfidence:null,aiSummary:'',syncStatus:'pending',backendStatus:'pending',driveFileId:'',source:'archive-import',schemaVersion:12,appVersion:APP_VERSION};
+      rec.id=await addPhoto(rec);
+      if(navigator.onLine){
+        const result=await sendToBackend(rec);
+        rec.tags=normalizeTags(result.tags||[]); rec.aiStatus='classified'; rec.aiConfidence=Number.isFinite(Number(result.confidence))?Number(result.confidence):null; rec.aiSummary=String(result.summary||'').slice(0,280); rec.syncStatus=result.driveUploaded?'synced':'pending'; rec.backendStatus='completed'; rec.driveFileId=result.driveFileId||''; rec.syncedAt=result.driveUploaded?Date.now():null; rec.lastError=''; await putPhoto(rec);
+      }
+      ok++;
+    }catch(err){console.warn('Import fallito',file.name,err);failed++;}
+  }
+  sharedArchiveFetchedAt=0; await updateCount(); await renderArchive(); $('importProgressTitle').textContent='Importazione completata'; $('importProgressSub').textContent=`${ok} importate${failed?` · ${failed} non riuscite`:''}`; setTimeout(()=>$('importProgress').classList.add('hidden'),4500); e.target.value='';
+}
+
+async function assignCurrentLocationToOpenPhoto(){
+  if(currentModalPhotoId==null)return;
+  let pos; try{pos=await acquireLocation()}catch(err){alert(String(err?.message||err));return}
+  const p=await resolvePhoto(currentModalPhotoId); if(!p)return;
+  p.lat=pos.lat;p.lng=pos.lng;p.accuracy=pos.accuracy||0;
+  if(p.remote||p.driveFileId){
+    const res=await fetch(settings.backendEndpoint.replace(/\/$/,'')+'/update-location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({driveFileId:p.driveFileId,lat:p.lat,lng:p.lng,accuracy:p.accuracy})});
+    const text=await res.text();let data; try{data=JSON.parse(text)}catch{throw new Error(text.slice(0,200))}
+    if(!res.ok||!data.ok)throw new Error(data.message||data.error||'Aggiornamento posizione fallito'); sharedArchiveFetchedAt=0; await fetchSharedArchive(true);
+  }else{
+    const local=await getAllPhotos(); const rec=local.find(x=>String(x.id)===String(p.id)); if(rec){rec.lat=p.lat;rec.lng=p.lng;rec.accuracy=p.accuracy;rec.backendStatus='pending';rec.syncStatus='pending';await putPhoto(rec)}
+  }
+  refreshModalMeta(p); await refreshVisibleViews();
+}
+
 async function renderArchive(){
-  const photos=await getUnifiedPhotos(true);
-  const host=$('archiveGallery');
-  if(!host)return;
+  let photos=await getUnifiedPhotos(true);
+  if(showMissingGpsOnly){photos=photos.filter(p=>p.lat===null||p.lng===null||!Number.isFinite(Number(p.lat))||!Number.isFinite(Number(p.lng)));}
+  const host=$('archiveGallery'); if(!host)return;
   $('archiveEmpty').classList.toggle('hidden',photos.length>0);
-  host.innerHTML=photos.map(photoCardHTML).join('');
-  bindPhotoCards(host,photos);
+  host.innerHTML=photos.map(photoCardHTML).join(''); bindPhotoCards(host,photos);
 }
 
 
@@ -484,7 +529,8 @@ async function renderTagGallery(){
 
 
 function photoCardHTML(p){
-  return `<button class="photo-card" data-id="${escapeHtml(p.id)}">
+  const noGps=(p.lat===null||p.lng===null||!Number.isFinite(Number(p.lat))||!Number.isFinite(Number(p.lng)));
+  return `<button class="photo-card ${noGps?'no-gps':''}" data-id="${escapeHtml(p.id)}">
     <img src="${p.image}" alt="Foto cantiere">
     <div class="overlay">${new Date(p.createdAt).toLocaleDateString('it-IT')}<br>${(p.tags||[]).slice(0,3).map(escapeHtml).join(' · ')}</div>
   </button>`;
@@ -497,21 +543,13 @@ function bindPhotoCards(host,all){
 }
 
 function openPhoto(id,all){
-  const p=all.find(x=>String(x.id)===String(id));
-  if(!p)return;
-
-  currentModalPhotoId=String(id);
-
-  $('modalImg').src=p.image;
-  $('modalMeta').innerHTML=`
-    <strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong>
-    <div class="muted">GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m</div>
-    <div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
-    ${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
-
-  renderManualTagEditor(p);
-  $('photoModal').classList.remove('hidden');
+  const p=all.find(x=>String(x.id)===String(id)); if(!p)return;
+  currentModalPhotoId=String(id); $('modalImg').src=p.image;
+  const hasGps=p.lat!==null&&p.lng!==null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng));
+  $('modalMeta').innerHTML=`<strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong><div class="muted">${hasGps?`GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m`:'Posizione non assegnata'}</div><div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
+  $('assignCurrentLocationBtn').classList.toggle('hidden',hasGps); renderManualTagEditor(p); $('photoModal').classList.remove('hidden');
 }
+
 
 function renderManualTagEditor(photo){
   const quick=['ringhiera','scala','soppalco','tettoia','parapetto','cancello','recinzione','passerella','grigliato','zincato','verniciato','installato'];
@@ -600,11 +638,9 @@ async function persistManualTags(photo){
   }
 }
 function refreshModalMeta(p){
-  $('modalMeta').innerHTML=`
-    <strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong>
-    <div class="muted">GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m</div>
-    <div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
-    ${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
+  const hasGps=p.lat!==null&&p.lng!==null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng));
+  $('modalMeta').innerHTML=`<strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong><div class="muted">${hasGps?`GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m`:'Posizione non assegnata'}</div><div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
+  $('assignCurrentLocationBtn').classList.toggle('hidden',hasGps);
 }
 
 
@@ -623,7 +659,7 @@ function bindModal(){
 }
 
 async function renderMap(){
-  const all=(await getUnifiedPhotos()).filter(p=>Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));
+  const all=(await getUnifiedPhotos()).filter(p=>p.lat!==null&&p.lng!==null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));
   const photos=all.filter(p=>[...mapTags].every(t=>(p.tags||[]).includes(t)));
   $('mapEmpty').classList.toggle('hidden',photos.length>0);
   renderMapFilterBar(all);
