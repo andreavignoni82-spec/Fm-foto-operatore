@@ -142,7 +142,10 @@ async function uploadPhoto(token,rootId,input,classification){
       lat:String(input.lat??""),
       lng:String(input.lng??""),
       capturedAt:String(input.capturedAt??""),
-      tags:(classification.tags||[]).join("|")
+      tags:(classification.tags||[]).join("|"),
+      manualTags:(input.manualTags||[]).join("|"),
+      summary:String(classification.summary||"").slice(0,120),
+      accuracy:String(input.accuracy??"")
     }
   };
 
@@ -228,6 +231,51 @@ Rispondi esclusivamente in JSON:
   };
 }
 
+
+async function listArchive(token,env){
+  const q=encodeURIComponent("appProperties has { key='fmfoto' and value='1' } and trashed=false");
+  let pageToken="",files=[];
+  do{
+    const url="https://www.googleapis.com/drive/v3/files"+
+      `?q=${q}&spaces=drive&pageSize=1000&orderBy=createdTime desc&fields=nextPageToken,files(id,name,createdTime,modifiedTime,description,appProperties)`+
+      (pageToken?`&pageToken=${encodeURIComponent(pageToken)}`:"");
+    const r=await driveRequest(token,url),j=await r.json();
+    files.push(...(j.files||[])); pageToken=j.nextPageToken||"";
+  }while(pageToken);
+
+  return files.map(f=>{
+    const ap=f.appProperties||{};
+    return {
+      driveFileId:f.id,name:f.name,createdTime:f.createdTime,
+      capturedAt:Number(ap.capturedAt)||Date.parse(f.createdTime)||0,
+      lat:Number(ap.lat),lng:Number(ap.lng),accuracy:Number(ap.accuracy)||0,
+      tags:(ap.tags||"").split("|").map(x=>x.trim()).filter(Boolean),
+      manualTags:(ap.manualTags||"").split("|").map(x=>x.trim()).filter(Boolean),
+      summary:ap.summary||"",
+      photoUrl:`${env.PUBLIC_BASE_URL}/photo?id=${encodeURIComponent(f.id)}`
+    };
+  });
+}
+async function proxyPhoto(token,fileId){
+  const r=await driveRequest(token,`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`);
+  const h=new Headers({"Content-Type":r.headers.get("Content-Type")||"image/jpeg","Cache-Control":"public, max-age=3600","Access-Control-Allow-Origin":ALLOWED_ORIGIN});
+  return new Response(r.body,{status:200,headers:h});
+}
+async function updateDriveTags(token,fileId,manualTags){
+  const metaRes=await driveRequest(token,`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,description,appProperties`);
+  const file=await metaRes.json(),ap=file.appProperties||{};
+  const existing=(ap.tags||"").split("|").map(x=>x.trim()).filter(Boolean);
+  const oldManual=(ap.manualTags||"").split("|").map(x=>x.trim()).filter(Boolean);
+  const aiTags=existing.filter(t=>!oldManual.includes(t));
+  const cleaned=[...new Set((manualTags||[]).map(x=>String(x).trim().toLowerCase()).filter(Boolean))].slice(0,20);
+  const tags=[...new Set([...aiTags,...cleaned])].slice(0,30);
+  const patch={appProperties:{...ap,tags:tags.join("|"),manualTags:cleaned.join("|")}};
+  const r=await driveRequest(token,`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id`,{
+    method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)
+  });
+  await r.json(); return {tags,manualTags:cleaned};
+}
+
 export default{
   async fetch(request,env){
     if(request.method==="OPTIONS"){
@@ -240,7 +288,7 @@ export default{
       return json({
         service:"FM foto backend",
         status:"online",
-        version:"2.1",
+        version:"2.5",
         ai:true,
         driveBackend:true,
         config:{
@@ -275,6 +323,39 @@ export default{
       }
     }
 
+    if(request.method==="GET"&&url.pathname==="/archive"){
+      try{
+        const token=await googleAccessToken(env);
+        const photos=await listArchive(token,{...env,PUBLIC_BASE_URL:`${url.protocol}//${url.host}`});
+        return json({ok:true,photos});
+      }catch(err){
+        return json({ok:false,error:"ARCHIVE_FAILED",message:String(err?.message||err)},500);
+      }
+    }
+
+    if(request.method==="GET"&&url.pathname==="/photo"){
+      try{
+        const id=url.searchParams.get("id");
+        if(!id)return json({ok:false,error:"MISSING_ID"},400);
+        const token=await googleAccessToken(env);
+        return await proxyPhoto(token,id);
+      }catch(err){
+        return json({ok:false,error:"PHOTO_FAILED",message:String(err?.message||err)},500);
+      }
+    }
+
+    if(request.method==="POST"&&url.pathname==="/update-tags"){
+      try{
+        const input=await request.json();
+        if(!input.driveFileId)return json({ok:false,error:"MISSING_FILE_ID"},400);
+        const token=await googleAccessToken(env);
+        const result=await updateDriveTags(token,input.driveFileId,Array.isArray(input.manualTags)?input.manualTags:[]);
+        return json({ok:true,...result});
+      }catch(err){
+        return json({ok:false,error:"UPDATE_TAGS_FAILED",message:String(err?.message||err)},500);
+      }
+    }
+
     if(request.method!=="POST"||url.pathname!=="/process"){
       return json({error:"not_found"},404);
     }
@@ -298,6 +379,13 @@ export default{
       }
 
       const classification=await classify(env,input);
+
+      if(Array.isArray(input.manualTags)){
+        classification.tags=[...new Set([
+          ...(classification.tags||[]),
+          ...input.manualTags.map(x=>String(x).trim().toLowerCase()).filter(Boolean)
+        ])].slice(0,12);
+      }
 
       const token=await googleAccessToken(env);
 
