@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=16;
+const DB_VERSION=17;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.3';
+const APP_VERSION='7.7.4';
 
 let db=null;
 let currentPosition=null;
@@ -44,6 +44,7 @@ async function init(){
       await processImportQueue(false);
     }finally{
       await updateQueueStatus();
+  await checkBackendAI();
     }
   });
 
@@ -259,21 +260,16 @@ async function handlePhoto(e){
 
       const result=await sendToBackend(rec);
 
-      const aiTags=normalizeTags(result.tags||[]);
-      rec.tags=normalizeTags([...(aiTags||[]),...(rec.manualTags||[])]);
-      rec.aiStatus='classified';
-      rec.aiConfidence=Number.isFinite(Number(result.confidence))?Number(result.confidence):null;
-      rec.aiSummary=String(result.summary||'').slice(0,280);
-      rec.syncStatus=result.driveUploaded?'synced':'pending';
-      rec.backendStatus='completed';
-      rec.driveFileId=result.driveFileId||'';
-      rec.syncedAt=result.driveUploaded?Date.now():null;
-      rec.lastError='';
+      applyBackendResultToRecord(rec,result);
       await putPhoto(rec);
       sharedArchiveFetchedAt=0;
 
       hideWorking();
-      showSuccess('Foto classificata e archiviata automaticamente.');
+      showSuccess(
+        rec.aiStatus==='classified'
+          ? 'Foto classificata e archiviata automaticamente.'
+          : 'Foto archiviata. AI temporaneamente non disponibile.'
+      );
     }else{
       hideWorking();
       showSuccess('Foto salvata. Verrà elaborata appena torna la connessione.');
@@ -344,40 +340,40 @@ async function sendToBackend(rec){
     throw new Error('Backend non configurato');
   }
 
-  const res=await fetch(
-    settings.backendEndpoint.replace(/\/$/,'')+'/process',
-    {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        localId:String(rec.id),
-        image:rec.image,
-        capturedAt:rec.createdAt,
-        lat:rec.lat,
-        lng:rec.lng,
-        accuracy:rec.accuracy,
-        allowedTags:tagsVoc,
-        manualTags:rec.manualTags||[],
-        source:rec.source||'camera'
-      })
-    }
-  );
+  const endpoint=settings.backendEndpoint.replace(/\/$/,'')+'/process';
+
+  setAIStatus('working','AI: analisi in corso…');
+
+  const res=await fetch(endpoint,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      localId:String(rec.id),
+      image:rec.image,
+      capturedAt:rec.capturedAt||rec.createdAt||Date.now(),
+      lat:rec.lat,
+      lng:rec.lng,
+      accuracy:rec.accuracy,
+      allowedTags:tagsVoc,
+      manualTags:rec.manualTags||[],
+      source:rec.source||'camera',
+      skipAI:false
+    })
+  });
 
   const text=await res.text();
-
   let data;
+
   try{
     data=JSON.parse(text);
   }catch{
     throw new Error(`Backend ${res.status}: ${text.slice(0,200)}`);
   }
 
-  if(!res.ok){
-    throw new Error(data.message||data.error||`Backend ${res.status}`);
-  }
-
-  if(!data.ok){
-    throw new Error(data.message||'Backend non completato');
+  if(!res.ok||!data.ok){
+    const msg=data.message||data.error||`Backend ${res.status}`;
+    setAIStatus('error',`AI/backend: ${msg}`);
+    throw new Error(msg);
   }
 
   return data;
@@ -413,6 +409,80 @@ function compress(file,maxSide,quality){
     r.onerror=reject;
     r.readAsDataURL(file);
   });
+}
+
+
+function setAIStatus(kind,text){
+  const bar=document.getElementById('aiStatusBar');
+  const label=document.getElementById('aiStatusText');
+  if(!bar||!label)return;
+  bar.classList.remove('ai-status-neutral','ai-status-ok','ai-status-working','ai-status-warning','ai-status-error');
+  const safe=['ok','working','warning','error'].includes(kind)?kind:'neutral';
+  bar.classList.add(`ai-status-${safe}`);
+  label.textContent=text||'AI';
+}
+
+function applyBackendResultToRecord(rec,result){
+  const aiTags=normalizeTags(result.tags||rec.tags||[]);
+  rec.tags=normalizeTags([...(aiTags||[]),...(rec.manualTags||[])]);
+  rec.aiStatus=result.aiStatus||(
+    result.aiAvailable===false ? 'error' : 'classified'
+  );
+  rec.aiConfidence=Number.isFinite(Number(result.confidence))
+    ? Number(result.confidence)
+    : rec.aiConfidence;
+  rec.aiSummary=String(result.summary||rec.aiSummary||'').slice(0,280);
+  rec.aiError=String(result.aiError||'').slice(0,250);
+  rec.syncStatus=result.driveUploaded?'synced':'pending';
+  rec.backendStatus='completed';
+  rec.driveFileId=result.driveFileId||rec.driveFileId||'';
+  rec.syncedAt=result.driveUploaded?Date.now():rec.syncedAt;
+  rec.lastError='';
+
+  if(rec.aiStatus==='classified'){
+    setAIStatus('ok','AI: classificazione completata');
+  }else if(rec.aiStatus==='error'){
+    const e=rec.aiError.toLowerCase();
+    if(e.includes('4006')||e.includes('quota')||e.includes('daily free allocation')||e.includes('10,000 neurons')){
+      setAIStatus('warning','AI: quota gratuita esaurita · foto archiviata');
+    }else{
+      setAIStatus('error',`AI: ${rec.aiError||'classificazione non disponibile'}`);
+    }
+  }else{
+    setAIStatus('warning','AI: foto archiviata · classificazione non disponibile');
+  }
+}
+
+async function checkBackendAI(){
+  if(!settings?.backendEndpoint){
+    setAIStatus('error','AI: backend non configurato');
+    return false;
+  }
+
+  try{
+    const res=await fetch(
+      settings.backendEndpoint.replace(/\/$/,'')+'/',
+      {cache:'no-store'}
+    );
+
+    if(!res.ok){
+      setAIStatus('error',`AI/backend HTTP ${res.status}`);
+      return false;
+    }
+
+    const data=await res.json();
+
+    if(data?.config?.aiBinding===true){
+      setAIStatus('ok',`AI: disponibile · Worker ${data.version||''}`);
+      return true;
+    }
+
+    setAIStatus('warning','AI: binding Cloudflare non disponibile');
+    return false;
+  }catch(err){
+    setAIStatus('error','AI/backend non raggiungibile');
+    return false;
+  }
 }
 
 function normalizeTags(a){
@@ -845,43 +915,12 @@ async function processImportQueue(forceRetry=false){
       try{
         const result=await sendToBackend(rec);
 
-        rec.tags=normalizeTags([
-          ...(result.tags||[]),
-          ...(rec.manualTags||[])
-        ]);
-
-        // Rispetta il vero stato AI restituito dal Worker V2.8.
-        rec.aiStatus=result.aiStatus||'classified';
-
-        rec.aiConfidence=
-          Number.isFinite(Number(result.confidence))
-            ? Number(result.confidence)
-            : null;
-
-        rec.aiSummary=
-          String(result.summary||'')
-            .slice(0,280);
-
-        rec.aiError=
-          String(result.aiError||'')
-            .slice(0,250);
+        applyBackendResultToRecord(rec,result);
 
         if(result.driveUploaded===true){
-          rec.syncStatus='synced';
-          rec.backendStatus='completed';
           rec.importQueueStatus='synced';
-
-          rec.driveFileId=
-            result.driveFileId||
-            rec.driveFileId||
-            '';
-
-          rec.syncedAt=Date.now();
           rec.importLastError='';
-          rec.lastError='';
         }else{
-          rec.syncStatus='pending';
-          rec.backendStatus='error';
           rec.importQueueStatus='error';
           rec.importLastError='Il backend non ha confermato il salvataggio Drive.';
           rec.lastError=rec.importLastError;
