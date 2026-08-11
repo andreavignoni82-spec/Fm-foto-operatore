@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=17;
+const DB_VERSION=18;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.4';
+const APP_VERSION='7.7.4.1';
 
 let db=null;
 let currentPosition=null;
@@ -20,6 +20,28 @@ const tagsVoc=[
 ];
 
 document.addEventListener('DOMContentLoaded',init);
+
+
+async function retryBackendAICheckOnce(){
+  await new Promise(
+    resolve=>setTimeout(resolve,1800)
+  );
+
+  const label=
+    document.getElementById('aiStatusText');
+
+  const current=
+    String(label?.textContent||'');
+
+  if(
+    current.includes('verifica') ||
+    current.includes('backend lento') ||
+    current.includes('non raggiungibile')
+  ){
+    await checkBackendAI();
+  retryBackendAICheckOnce();
+  }
+}
 
 async function init(){
   db=await openDB();
@@ -453,34 +475,168 @@ function applyBackendResultToRecord(rec,result){
   }
 }
 
+
+async function fetchWithTimeout(url,options={},timeoutMs=5000){
+  const controller=new AbortController();
+  const timer=setTimeout(
+    ()=>controller.abort(),
+    timeoutMs
+  );
+
+  try{
+    return await fetch(url,{
+      ...options,
+      signal:controller.signal
+    });
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
 async function checkBackendAI(){
-  if(!settings?.backendEndpoint){
-    setAIStatus('error','AI: backend non configurato');
+  const endpoint=String(
+    settings?.backendEndpoint||''
+  ).trim();
+
+  if(!endpoint){
+    setAIStatus(
+      'error',
+      'AI: backend non configurato'
+    );
     return false;
   }
 
+  const rootUrl=
+    endpoint.replace(/\/+$/,'') + '/';
+
+  setAIStatus(
+    'working',
+    'AI: verifica backend…'
+  );
+
   try{
-    const res=await fetch(
-      settings.backendEndpoint.replace(/\/$/,'')+'/',
-      {cache:'no-store'}
+    const res=await fetchWithTimeout(
+      rootUrl,
+      {
+        method:'GET',
+        cache:'no-store',
+        headers:{
+          'Accept':'application/json'
+        }
+      },
+      5000
     );
 
     if(!res.ok){
-      setAIStatus('error',`AI/backend HTTP ${res.status}`);
+      setAIStatus(
+        'error',
+        `AI/backend: HTTP ${res.status}`
+      );
+
+      console.error(
+        'FM Foto AI startup check HTTP error',
+        res.status,
+        rootUrl
+      );
+
       return false;
     }
 
-    const data=await res.json();
+    const text=await res.text();
+    let data={};
 
-    if(data?.config?.aiBinding===true){
-      setAIStatus('ok',`AI: disponibile · Worker ${data.version||''}`);
+    try{
+      data=text
+        ? JSON.parse(text)
+        : {};
+    }catch(err){
+      setAIStatus(
+        'error',
+        'AI/backend: risposta non valida'
+      );
+
+      console.error(
+        'FM Foto AI startup JSON error',
+        err,
+        text
+      );
+
+      return false;
+    }
+
+    const version=
+      String(data?.version||'?');
+
+    const aiBinding=
+      data?.config?.aiBinding;
+
+    if(aiBinding===true){
+      setAIStatus(
+        'ok',
+        `AI: disponibile · Worker ${version}`
+      );
+
+      console.info(
+        'FM Foto AI startup OK',
+        data
+      );
+
       return true;
     }
 
-    setAIStatus('warning','AI: binding Cloudflare non disponibile');
+    if(aiBinding===false){
+      setAIStatus(
+        'warning',
+        `AI: binding Cloudflare non configurato · Worker ${version}`
+      );
+
+      console.warn(
+        'FM Foto AI binding missing',
+        data
+      );
+
+      return false;
+    }
+
+    setAIStatus(
+      'warning',
+      `AI: Worker ${version} raggiungibile · stato binding non dichiarato`
+    );
+
+    console.warn(
+      'FM Foto AI binding state unknown',
+      data
+    );
+
     return false;
+
   }catch(err){
-    setAIStatus('error','AI/backend non raggiungibile');
+    const isAbort=
+      err?.name==='AbortError';
+
+    if(isAbort){
+      setAIStatus(
+        'warning',
+        'AI: verifica scaduta · backend lento/non raggiungibile'
+      );
+
+      console.warn(
+        'FM Foto AI startup timeout',
+        rootUrl
+      );
+    }else{
+      setAIStatus(
+        'error',
+        'AI: backend non raggiungibile'
+      );
+
+      console.error(
+        'FM Foto AI startup network/CORS error',
+        err,
+        rootUrl
+      );
+    }
+
     return false;
   }
 }

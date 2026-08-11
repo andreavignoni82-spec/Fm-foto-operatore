@@ -87,3 +87,8 @@
 .ai-status-warning{background:#fff7ed;color:#9a3412}.ai-status-warning .ai-status-dot{background:#f59e0b}
 .ai-status-error{background:#fef2f2;color:#991b1b}.ai-status-error .ai-status-dot{background:#ef4444}
 @keyframes fmPulse{0%,100%{opacity:.35;transform:scale(.9)}50%{opacity:1;transform:scale(1.15)}}
+
+.ai-status-bar #aiStatusText{
+  min-width:0;
+  overflow-wrap:anywhere;
+}
