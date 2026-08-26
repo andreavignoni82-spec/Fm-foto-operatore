@@ -2,7 +2,7 @@ const DB_NAME='famaferFotoCantiere';
 const DB_VERSION=22;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.7.1';
+const APP_VERSION='7.7.8';
 
 let db=null;
 let currentPosition=null;
@@ -56,6 +56,20 @@ async function init(){
   $('archiveSelectBtn').addEventListener('click',toggleArchiveSelectionMode);
   $('archiveShareBtn').addEventListener('click',()=>shareSelectedPhotos('archive'));
   $('archiveDeleteBtn').addEventListener('click',deleteSelectedArchivePhotos);
+
+  $('tagSearchInput').addEventListener('input',async e=>{
+    tagSearchQuery=String(e.target.value||'').trim();
+    $('tagSearchClearBtn').classList.toggle('hidden',!tagSearchQuery);
+    await renderTagGallery();
+  });
+
+  $('tagSearchClearBtn').addEventListener('click',async()=>{
+    tagSearchQuery='';
+    $('tagSearchInput').value='';
+    $('tagSearchClearBtn').classList.add('hidden');
+    await renderTagGallery();
+    $('tagSearchInput').focus();
+  });
 
   $('tagSelectBtn').addEventListener('click',toggleTagSelectionMode);
   $('tagSelectAllBtn').addEventListener('click',selectAllCurrentTagPhotos);
@@ -707,6 +721,7 @@ let bulkSelectedIds=new Set();
 let archiveSelectionMode=false;
 let tagSelectionMode=false;
 let currentTagPhotos=[];
+let tagSearchQuery='';
 let currentMapGroup=[];
 
 function bindNavigation(){
@@ -1607,16 +1622,165 @@ function renderTagFilters(){
   };
 }
 
+
+const TAG_SEARCH_GROUPS=[
+  ['ringhiera','ringhiere','parapetto','parapetti','corrimano','balaustra','balaustre'],
+  ['cancello','cancelli','carrabile','pedonale','cancello scorrevole','cancello battente'],
+  ['recinzione','recinzioni','recinto','rete','grigliato','grigliata','pannello recinzione','staccionata'],
+  ['scala','scale','gradino','gradini','pedata','cosciale','rampe','rampa'],
+  ['tettoia','tettoie','pensilina','pensiline','copertura','coperture'],
+  ['carpenteria','struttura metallica','carpenteria strutturale','struttura acciaio','strutture metalliche'],
+  ['trave','travi','ipe','hea','heb','upn','unp','profilo','profili'],
+  ['pilastro','pilastri','colonna','colonne','montante','montanti'],
+  ['piastra','piastre','piastra base','flangia','flange','staffa','staffe','mensola','mensole'],
+  ['lamiera','lamiere','lamiera piegata','lamiera forata','lamiera grecata','lamiera stirata'],
+  ['rete','reti','rete elettrosaldata','rete stirata','grigliato','grigliati'],
+  ['inox','acciaio inox','acciaio inossidabile','inossidabile'],
+  ['zincato','zincata','zincati','zincate','zincatura','zincato a caldo'],
+  ['verniciato','verniciata','verniciati','verniciate','verniciatura','verniciato a polvere'],
+  ['saldato','saldata','saldati','saldate','saldatura','saldature'],
+  ['bullonato','bullonata','bullonati','bullonate','bullone','bulloni','tirafondo','tirafondi'],
+  ['soppalco','soppalchi','mezzanino','mezzanini'],
+  ['passerella','passerelle','camminamento','camminamenti'],
+  ['grigliato','grigliati','griglia','griglie'],
+  ['porta','porte','portone','portoni','serramento','serramenti'],
+  ['capannone','capannoni','industriale','struttura industriale']
+];
+
+function normalizeSearchText(value){
+  return String(value||'')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+function simpleStem(value){
+  let s=normalizeSearchText(value);
+  if(s.length<=4)return s;
+  for(const suffix of ['azioni','zione','zioni','mente']){
+    if(s.endsWith(suffix) && s.length-suffix.length>=4){
+      return s.slice(0,-suffix.length);
+    }
+  }
+  if(/[aeio]$/.test(s) && s.length>4)s=s.slice(0,-1);
+  return s;
+}
+
+function levenshteinDistance(a,b){
+  a=String(a||''); b=String(b||'');
+  if(a===b)return 0;
+  if(!a.length)return b.length;
+  if(!b.length)return a.length;
+
+  const prev=Array.from({length:b.length+1},(_,i)=>i);
+  const curr=new Array(b.length+1);
+
+  for(let i=1;i<=a.length;i++){
+    curr[0]=i;
+    for(let j=1;j<=b.length;j++){
+      const cost=a[i-1]===b[j-1]?0:1;
+      curr[j]=Math.min(curr[j-1]+1,prev[j]+1,prev[j-1]+cost);
+    }
+    for(let j=0;j<=b.length;j++)prev[j]=curr[j];
+  }
+  return prev[b.length];
+}
+
+function similarSearchTerm(a,b){
+  const x=normalizeSearchText(a);
+  const y=normalizeSearchText(b);
+  if(!x||!y)return false;
+  if(x===y)return true;
+  if(x.includes(y)||y.includes(x))return true;
+
+  const sx=simpleStem(x), sy=simpleStem(y);
+  if(sx && sy && (sx===sy || sx.includes(sy) || sy.includes(sx)))return true;
+
+  const maxLen=Math.max(x.length,y.length);
+  if(maxLen>=5){
+    const allowed=maxLen<=7?1:2;
+    if(levenshteinDistance(x,y)<=allowed)return true;
+  }
+  return false;
+}
+
+function expandedSearchTerms(query){
+  const q=normalizeSearchText(query);
+  if(!q)return [];
+  const words=q.split(' ').filter(Boolean);
+  const result=new Set([q,...words]);
+
+  for(const group of TAG_SEARCH_GROUPS){
+    const normalizedGroup=group.map(normalizeSearchText);
+    const groupMatches=normalizedGroup.some(term=>
+      similarSearchTerm(q,term) ||
+      words.some(word=>similarSearchTerm(word,term))
+    );
+    if(groupMatches)normalizedGroup.forEach(term=>result.add(term));
+  }
+  return [...result];
+}
+
+function photoMatchesSmartTagSearch(photo,query){
+  const q=normalizeSearchText(query);
+  if(!q)return true;
+
+  const terms=expandedSearchTerms(q);
+  const tags=[
+    ...(photo?.tags||[]),
+    ...(photo?.manualTags||[])
+  ].map(normalizeSearchText).filter(Boolean);
+
+  if(!tags.length)return false;
+  return terms.some(term=>tags.some(tag=>similarSearchTerm(term,tag)));
+}
+
+function relatedTagNamesForQuery(query,allPhotos){
+  const terms=expandedSearchTerms(query);
+  if(!terms.length)return [];
+
+  const allTags=[...new Set(
+    (allPhotos||[])
+      .flatMap(p=>[...(p.tags||[]),...(p.manualTags||[])])
+      .map(normalizeSearchText)
+      .filter(Boolean)
+  )];
+
+  return allTags
+    .filter(tag=>terms.some(term=>similarSearchTerm(term,tag)))
+    .slice(0,10);
+}
+
 async function renderTagGallery(){
   const all=await getUnifiedPhotos();
 
   const photos=all.filter(
-    p=>
-      [...activeTags]
-        .every(
-          t=>(p.tags||[]).includes(t)
-        )
+    p=>{
+      const exactFiltersMatch=
+        [...activeTags].every(t=>(p.tags||[]).includes(t));
+
+      const smartSearchMatch=
+        photoMatchesSmartTagSearch(p,tagSearchQuery);
+
+      return exactFiltersMatch && smartSearchMatch;
+    }
   );
+
+  const hint=$('tagSearchHint');
+  if(hint){
+    if(tagSearchQuery){
+      const related=relatedTagNamesForQuery(tagSearchQuery,all);
+      hint.textContent=
+        photos.length
+          ? `${photos.length} foto trovate${related.length?` · tag associati: ${related.join(', ')}`:''}`
+          : `Nessuna foto trovata per "${tagSearchQuery}".`;
+    }else{
+      hint.textContent='Cerca liberamente: il sistema include automaticamente tag simili e correlati.';
+    }
+  }
 
   currentTagPhotos=photos;
 

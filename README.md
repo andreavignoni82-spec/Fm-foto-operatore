@@ -1,21 +1,19 @@
-# FM Foto Operatore V2.7.7 — Archive Delete
+FM Foto Operatore V2.7.8 — Smart Tag Search
 
-Base: V2.7.6.5 funzionante.
+Base: V2.7.7.1 funzionante.
 DB_VERSION resta 22.
+Worker Gemini invariato.
 
-## Archivio
-In modalità `Seleziona` compaiono:
-- Condividi (N)
-- 🗑 Elimina (N)
+Nuovo campo libero nella pagina Tag:
+- ricerca esatta;
+- singolare/plurale e forme simili;
+- parole contenute;
+- piccoli errori di battitura;
+- associazione automatica di tag correlati.
 
-La cancellazione:
-1. chiede conferma;
-2. elimina la foto dal Google Drive condiviso tramite `/delete-photo`;
-3. elimina la copia locale dal dispositivo;
-4. aggiorna Archivio, Tag e Mappa;
-5. sugli altri dispositivi la foto scompare al successivo refresh/sincronizzazione.
-
-Se Drive fallisce, la copia locale NON viene cancellata per evitare perdita del riferimento.
-
-## Worker
-Richiede Worker FM Foto V2.12 con endpoint POST `/delete-photo`.
+Esempi:
+ringhiera -> parapetto, corrimano, balaustra
+recinzione -> rete, grigliato e varianti
+cancello -> carrabile/pedonale, scorrevole/battente
+inox -> acciaio inox / inossidabile
+scala -> gradino, pedata, cosciale

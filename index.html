@@ -8,8 +8,8 @@
 <title>FM foto</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v=7.7.7">
-<link rel="stylesheet" href="operator.css?v=7.7.7">
+<link rel="stylesheet" href="styles.css?v=7.7.8">
+<link rel="stylesheet" href="operator.css?v=7.7.8">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 </head>
 <body class="operator-body">
@@ -105,6 +105,19 @@
       <p>Filtra le foto per tipologia, seleziona quelle che vuoi e condividile insieme.</p>
     </div>
 
+    <div class="smart-tag-search">
+      <div class="smart-tag-search-box">
+        <span class="smart-tag-search-icon">⌕</span>
+        <input id="tagSearchInput" type="search" autocomplete="off" spellcheck="false"
+          placeholder="Cerca tag: es. ringhiera, cancello, inox, lamiera..."
+          aria-label="Cerca fotografie per tag">
+        <button id="tagSearchClearBtn" type="button" class="smart-tag-clear hidden" aria-label="Cancella ricerca">×</button>
+      </div>
+      <div id="tagSearchHint" class="smart-tag-hint">
+        Cerca liberamente: il sistema include automaticamente tag simili e correlati.
+      </div>
+    </div>
+
     <div class="tag-view-tools">
       <button id="tagSelectBtn" class="fm-btn secondary compact" type="button">Seleziona</button>
       <button id="tagSelectAllBtn" class="fm-btn secondary compact hidden" type="button">Seleziona tutte</button>
@@ -197,7 +210,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
-<script src="config.js?v=7.7.7"></script>
-<script src="operator.js?v=7.7.7"></script>
+<script src="config.js?v=7.7.8"></script>
+<script src="operator.js?v=7.7.8"></script>
 </body>
 </html>
