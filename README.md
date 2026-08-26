@@ -1,26 +1,19 @@
-# FM Foto Operatore V2.7.6
+# FM Foto Operatore V2.7.6.1 — Tag Cleanup Fix
 
-## Novità
+## Correzione
+Il tag `da classificare` è un segnaposto e non deve convivere con tag reali.
 
-### Pagina TAG
-- modalità `Seleziona`;
-- selezione singola toccando le foto;
-- `Seleziona tutte`;
-- `Deseleziona`;
-- `Condividi (N)`;
-- la condivisione riguarda soltanto le foto visibili con i filtri Tag correnti.
+Nuova regola:
+- solo `da classificare` -> resta visibile;
+- `da classificare + scala` -> diventa `scala`;
+- `da classificare + ringhiera + parapetto` -> diventa `ringhiera + parapetto`;
+- aggiunta manuale di un tag reale -> `da classificare` viene rimosso subito;
+- risposta Gemini con tag reali -> placeholder rimosso;
+- import PC già taggato -> placeholder rimosso;
+- Archivio, Tag, Mappa e scheda foto mostrano sempre i tag ripuliti.
 
-### Tag manuali
-Nella scheda foto è presente:
-`💾 Salva tag manuali`
-
-Flusso:
-1. scegli uno o più tag rapidi;
-2. oppure scrivi un nuovo tag e premi Aggiungi;
-3. compare `Modifiche da salvare`;
-4. premi `Salva tag manuali`;
-5. il tag viene salvato localmente e, se la foto è condivisa, aggiornato su Google Drive tramite `/update-tags`;
-6. compare `✓ Tag salvati`.
+## Dati già presenti
+All'avvio la PWA ripulisce automaticamente anche le foto locali già esistenti.
 
 ## Worker
-Non richiede modifiche al Worker Gemini V2.11.1.
+Nessuna modifica al Worker Gemini V2.11.1.
