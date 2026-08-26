@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=22;
+const DB_VERSION=21;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.6.1';
+const APP_VERSION='7.7.6.2';
 
 let db=null;
 let currentPosition=null;
@@ -43,36 +43,6 @@ async function retryBackendAICheckOnce(){
   }
 }
 
-
-async function cleanupExistingClassificationPlaceholders(){
-  try{
-    const local=await getAllPhotos();
-    let changed=0;
-
-    for(const rec of local){
-      const before=JSON.stringify(rec.tags||[]);
-      cleanupPhotoTags(rec);
-      const after=JSON.stringify(rec.tags||[]);
-
-      if(before!==after){
-        await putPhoto(rec);
-        changed++;
-      }
-    }
-
-    if(changed){
-      console.info(
-        `FM Foto: rimossi placeholder "da classificare" da ${changed} foto locali.`
-      );
-    }
-  }catch(err){
-    console.warn(
-      'FM Foto cleanup tag esistenti non completato',
-      err
-    );
-  }
-}
-
 async function init(){
   db=await openDB();
   settings=await loadSettings();
@@ -108,7 +78,6 @@ async function init(){
       await processImportQueue(false);
     }finally{
       await updateQueueStatus();
-  await cleanupExistingClassificationPlaceholders();
   await checkBackendAI();
     }
   });
@@ -685,64 +654,19 @@ async function checkBackendAI(){
 }
 
 function normalizeTags(a){
-
-const CLASSIFICATION_PLACEHOLDERS=new Set([
-  '',
-  'da classificare',
-  'da-classificare',
-  'non classificato',
-  'non classificata',
-  'pending'
-]);
-
-function cleanupClassificationTags(tags){
-  const normalized=normalizeTags(tags||[]);
-
-  const realTags=normalized.filter(
-    tag=>
-      !CLASSIFICATION_PLACEHOLDERS.has(
-        String(tag).trim().toLowerCase()
-      )
-  );
-
-  /*
-    Se esiste almeno un tag reale,
-    elimina SEMPRE il segnaposto "da classificare".
-    Se non c'è nessun tag reale, mantiene un solo placeholder.
-  */
-  return realTags.length
-    ? realTags
-    : ['da classificare'];
-}
-
-function cleanupPhotoTags(photo){
-  if(!photo)return photo;
-
-  photo.tags=cleanupClassificationTags(
-    photo.tags||[]
-  );
-
-  if(Array.isArray(photo.manualTags)){
-    photo.manualTags=normalizeTags(
-      photo.manualTags
-    ).filter(
-      tag=>
-        !CLASSIFICATION_PLACEHOLDERS.has(
-          String(tag).trim().toLowerCase()
-        )
-    );
-  }
-
-  return photo;
-}
-
-
   return [...new Set(
     (a||[])
       .map(x=>String(x).trim().toLowerCase())
       .filter(Boolean)
   )].slice(0,8);
 }
+function displayTagsWithoutPlaceholder(tags){
+  const normalized=normalizeTags(tags||[]);
+  const placeholders=new Set(['da classificare','da-classificare','non classificato','non classificata','pending']);
+  const real=normalized.filter(t=>!placeholders.has(String(t).trim().toLowerCase()));
+  return real.length ? real : normalized;
+}
+
 
 async function updateCount(){
   $('photoCount').textContent=(await getAllPhotos()).length;
@@ -1572,7 +1496,6 @@ async function renderTagGallery(){
 
 
 function photoCardHTML(p,options={}){
-  cleanupPhotoTags(p);
   const noGps=(
     p.lat===null||
     p.lng===null||
@@ -1696,11 +1619,9 @@ async function toggleManualTag(photoId,tag){
   }
 
   p.tags=
-    cleanupClassificationTags(
-      mergeDisplayTags(
-        p.tags,
-        p.manualTags
-      )
+    mergeDisplayTags(
+      p.tags,
+      p.manualTags
     );
 
   // Salva il draft localmente nel record visualizzato;
@@ -1760,11 +1681,9 @@ async function addCustomManualTag(){
     ]);
 
   p.tags=
-    cleanupClassificationTags(
-      mergeDisplayTags(
-        p.tags,
-        p.manualTags
-      )
+    mergeDisplayTags(
+      p.tags,
+      p.manualTags
     );
 
   const local=
@@ -1878,11 +1797,9 @@ async function saveCurrentManualTags(){
       p.manualTags||[]
     );
 
-    p.tags=cleanupClassificationTags(
-      mergeDisplayTags(
-        p.tags,
-        p.manualTags
-      )
+    p.tags=mergeDisplayTags(
+      p.tags,
+      p.manualTags
     );
 
     await persistManualTags(p);
@@ -1949,7 +1866,6 @@ async function persistManualTags(photo){
   }
 }
 function refreshModalMeta(p){
-  cleanupPhotoTags(p);
   const hasGps=p.lat!==null&&p.lng!==null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng));
   $('modalMeta').innerHTML=`<strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong><div class="muted">${p.dateSource?`Data: ${escapeHtml(p.dateSource)}<br>`:''}${hasGps?`GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m${p.gpsSource?` · ${escapeHtml(p.gpsSource)}`:''}`:'Posizione non presente nel file selezionato'}</div><div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
   $('assignCurrentLocationBtn').classList.toggle('hidden',hasGps);
