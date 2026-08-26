@@ -1,12 +1,21 @@
-FM Foto Operatore V2.7.6.5 — TAG LABEL FIX
+# FM Foto Operatore V2.7.7 — Archive Delete
 
-Partenza: V2.7.6.4 funzionante.
+Base: V2.7.6.5 funzionante.
 DB_VERSION resta 22.
 
-Regola visiva:
-- nessun tag reale -> `da classificare`;
-- almeno un tag reale -> `da classificare` non viene mostrato.
+## Archivio
+In modalità `Seleziona` compaiono:
+- Condividi (N)
+- 🗑 Elimina (N)
 
-La funzione usa una copia temporanea della foto esclusivamente per costruire la card:
-non modifica IndexedDB, non migra dati, non altera Archivio/Mappa/Drive.
-Worker Gemini invariato.
+La cancellazione:
+1. chiede conferma;
+2. elimina la foto dal Google Drive condiviso tramite `/delete-photo`;
+3. elimina la copia locale dal dispositivo;
+4. aggiorna Archivio, Tag e Mappa;
+5. sugli altri dispositivi la foto scompare al successivo refresh/sincronizzazione.
+
+Se Drive fallisce, la copia locale NON viene cancellata per evitare perdita del riferimento.
+
+## Worker
+Richiede Worker FM Foto V2.12 con endpoint POST `/delete-photo`.

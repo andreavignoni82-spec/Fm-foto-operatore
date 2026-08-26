@@ -2,7 +2,7 @@ const DB_NAME='famaferFotoCantiere';
 const DB_VERSION=22;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.6.5';
+const APP_VERSION='7.7.7';
 
 let db=null;
 let currentPosition=null;
@@ -55,6 +55,7 @@ async function init(){
   $('missingGpsBtn').addEventListener('click',async()=>{showMissingGpsOnly=!showMissingGpsOnly;$('missingGpsBtn').classList.toggle('primary',showMissingGpsOnly);await renderArchive();});
   $('archiveSelectBtn').addEventListener('click',toggleArchiveSelectionMode);
   $('archiveShareBtn').addEventListener('click',()=>shareSelectedPhotos('archive'));
+  $('archiveDeleteBtn').addEventListener('click',deleteSelectedArchivePhotos);
 
   $('tagSelectBtn').addEventListener('click',toggleTagSelectionMode);
   $('tagSelectAllBtn').addEventListener('click',selectAllCurrentTagPhotos);
@@ -1259,6 +1260,13 @@ function updateBulkSelectionUI(){
     a.classList.toggle('hidden',!archiveSelectionMode);
   }
 
+  const d=$('archiveDeleteBtn');
+  if(d){
+    d.textContent=`🗑 Elimina (${count})`;
+    d.disabled=count===0;
+    d.classList.toggle('hidden',!archiveSelectionMode);
+  }
+
   if(m){
     const mapCount=currentMapGroup.filter(p=>bulkSelectedIds.has(String(p.id))).length;
     m.textContent=`Condividi (${mapCount})`;
@@ -1352,6 +1360,159 @@ async function photoToShareFile(p,index){
   const blob=await response.blob();
   const type=blob.type&&blob.type.startsWith('image/')?blob.type:'image/jpeg';
   return new File([blob],photoFileName(p,index),{type,lastModified:Number(p.createdAt)||Date.now()});
+}
+
+
+async function deleteLocalPhotoById(photoId){
+  try{
+    const db=await openDB();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('photos','readwrite');
+      const store=tx.objectStore('photos');
+      const req=store.delete(photoId);
+
+      req.onsuccess=()=>resolve();
+      req.onerror=()=>reject(req.error);
+    });
+  }catch(err){
+    console.warn('Eliminazione foto locale non completata',photoId,err);
+  }
+}
+
+async function deleteDrivePhoto(photo){
+  if(!photo?.driveFileId){
+    return {ok:true,localOnly:true};
+  }
+
+  if(!settings?.backendEndpoint){
+    throw new Error('Backend non configurato');
+  }
+
+  const endpoint=
+    settings.backendEndpoint.replace(/\/+$/,'')+
+    '/delete-photo';
+
+  const res=await fetch(endpoint,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      driveFileId:String(photo.driveFileId)
+    })
+  });
+
+  const text=await res.text();
+  let data={};
+
+  try{
+    data=text?JSON.parse(text):{};
+  }catch{
+    throw new Error(`Backend ${res.status}: ${text.slice(0,200)}`);
+  }
+
+  if(!res.ok||!data.ok){
+    throw new Error(
+      data.message||
+      data.error||
+      `Backend ${res.status}`
+    );
+  }
+
+  return data;
+}
+
+async function deleteSelectedArchivePhotos(){
+  const all=await getUnifiedPhotos();
+  const ids=[...bulkSelectedIds];
+
+  const photos=
+    ids
+      .map(id=>all.find(p=>String(p.id)===String(id)))
+      .filter(Boolean);
+
+  if(!photos.length){
+    alert('Seleziona almeno una foto da eliminare.');
+    return;
+  }
+
+  const n=photos.length;
+
+  const confirmed=confirm(
+    n===1
+      ? 'Eliminare definitivamente questa foto dall’archivio e da Google Drive?'
+      : `Eliminare definitivamente ${n} foto dall’archivio e da Google Drive?`
+  );
+
+  if(!confirmed)return;
+
+  const btn=$('archiveDeleteBtn');
+  const oldText=btn?.textContent||`🗑 Elimina (${n})`;
+
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Eliminazione…';
+  }
+
+  let deleted=0;
+  const errors=[];
+
+  for(const photo of photos){
+    try{
+      /*
+        Prima elimina dal Drive condiviso.
+        Solo dopo rimuove la copia locale.
+        In questo modo non perdiamo il riferimento
+        se il backend dovesse fallire.
+      */
+      await deleteDrivePhoto(photo);
+
+      await deleteLocalPhotoById(photo.id);
+
+      bulkSelectedIds.delete(String(photo.id));
+      deleted++;
+
+    }catch(err){
+      console.error(
+        'FM Foto eliminazione:',
+        photo?.id,
+        err
+      );
+
+      errors.push({
+        photo,
+        message:String(err?.message||err)
+      });
+    }
+  }
+
+  sharedArchiveFetchedAt=0;
+
+  await refreshSharedArchive(true).catch(()=>{});
+  await refreshVisibleViews();
+
+  if(deleted>0){
+    alert(
+      deleted===1
+        ? 'Foto eliminata definitivamente.'
+        : `${deleted} foto eliminate definitivamente.`
+    );
+  }
+
+  if(errors.length){
+    alert(
+      `${errors.length} foto non sono state eliminate.\n\n`+
+      errors
+        .slice(0,5)
+        .map(e=>e.message)
+        .join('\n')
+    );
+  }
+
+  updateBulkSelectionUI();
+
+  if(btn){
+    btn.disabled=bulkSelectedIds.size===0;
+    btn.textContent=`🗑 Elimina (${bulkSelectedIds.size})`;
+  }
 }
 
 async function shareSelectedPhotos(source){

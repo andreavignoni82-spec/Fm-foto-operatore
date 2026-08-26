@@ -152,3 +152,21 @@
   color:#b42318;
 }
 
+
+
+/* ===== V2.7.7 ARCHIVE DELETE ===== */
+
+.fm-btn.danger{
+  background:#b42318;
+  color:#fff;
+  border-color:#b42318;
+}
+
+.fm-btn.danger:hover{
+  filter:brightness(.96);
+}
+
+.fm-btn.danger:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
