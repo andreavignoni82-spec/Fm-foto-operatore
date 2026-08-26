@@ -2,7 +2,7 @@ const DB_NAME='famaferFotoCantiere';
 const DB_VERSION=22;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.7';
+const APP_VERSION='7.7.7.1';
 
 let db=null;
 let currentPosition=null;
@@ -1484,9 +1484,17 @@ async function deleteSelectedArchivePhotos(){
     }
   }
 
+  /*
+    Invalida la cache condivisa e ricarica l'archivio reale dal Worker.
+    La funzione corretta esistente in questa versione è fetchSharedArchive().
+  */
   sharedArchiveFetchedAt=0;
+  sharedArchiveCache=[];
 
-  await refreshSharedArchive(true).catch(()=>{});
+  await fetchSharedArchive(true).catch(err=>{
+    console.warn('Aggiornamento archivio dopo eliminazione non riuscito',err);
+  });
+
   await refreshVisibleViews();
 
   if(deleted>0){
