@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=21;
+const DB_VERSION=22;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.6.3';
+const APP_VERSION='7.7.6.4';
 
 let db=null;
 let currentPosition=null;
