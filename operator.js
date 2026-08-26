@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=20;
+const DB_VERSION=21;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.5';
+const APP_VERSION='7.7.6';
 
 let db=null;
 let currentPosition=null;
@@ -55,11 +55,17 @@ async function init(){
   $('missingGpsBtn').addEventListener('click',async()=>{showMissingGpsOnly=!showMissingGpsOnly;$('missingGpsBtn').classList.toggle('primary',showMissingGpsOnly);await renderArchive();});
   $('archiveSelectBtn').addEventListener('click',toggleArchiveSelectionMode);
   $('archiveShareBtn').addEventListener('click',()=>shareSelectedPhotos('archive'));
+
+  $('tagSelectBtn').addEventListener('click',toggleTagSelectionMode);
+  $('tagSelectAllBtn').addEventListener('click',selectAllCurrentTagPhotos);
+  $('tagClearSelectionBtn').addEventListener('click',clearBulkSelection);
+  $('tagShareBtn').addEventListener('click',()=>shareSelectedPhotos('tag'));
   $('mapSelectAllBtn').addEventListener('click',selectAllCurrentMapGroup);
   $('mapClearSelectionBtn').addEventListener('click',clearBulkSelection);
   $('mapShareSelectedBtn').addEventListener('click',()=>shareSelectedPhotos('map'));
   $('closeMapLocationBtn').addEventListener('click',closeMapLocationGroup);
   $('assignCurrentLocationBtn').addEventListener('click',assignCurrentLocationToOpenPhoto);
+  $('saveManualTagsBtn').addEventListener('click',saveCurrentManualTags);
   $('startQueueBtn').addEventListener('click',async()=>{
     await recoverInterruptedQueue();
     await processImportQueue(false);
@@ -691,6 +697,8 @@ let activeTags=new Set();
 let mapTags=new Set();
 let bulkSelectedIds=new Set();
 let archiveSelectionMode=false;
+let tagSelectionMode=false;
+let currentTagPhotos=[];
 let currentMapGroup=[];
 
 function bindNavigation(){
@@ -1236,6 +1244,7 @@ function updateBulkSelectionUI(){
   const count=bulkSelectedIds.size;
   const a=$('archiveShareBtn');
   const m=$('mapShareSelectedBtn');
+  const t=$('tagShareBtn');
 
   if(a){
     a.textContent=`Condividi (${count})`;
@@ -1248,6 +1257,19 @@ function updateBulkSelectionUI(){
     m.textContent=`Condividi (${mapCount})`;
     m.disabled=mapCount===0;
   }
+
+  if(t){
+    const tagCount=currentTagPhotos.filter(p=>bulkSelectedIds.has(String(p.id))).length;
+    t.textContent=`Condividi (${tagCount})`;
+    t.disabled=tagCount===0;
+    t.classList.toggle('hidden',!tagSelectionMode);
+  }
+
+  const selectAll=$('tagSelectAllBtn');
+  const clear=$('tagClearSelectionBtn');
+
+  if(selectAll)selectAll.classList.toggle('hidden',!tagSelectionMode);
+  if(clear)clear.classList.toggle('hidden',!tagSelectionMode);
 }
 
 async function toggleArchiveSelectionMode(){
@@ -1257,6 +1279,33 @@ async function toggleArchiveSelectionMode(){
   $('archiveSelectBtn').classList.toggle('primary',archiveSelectionMode);
   updateBulkSelectionUI();
   await renderArchive();
+}
+
+async function toggleTagSelectionMode(){
+  tagSelectionMode=!tagSelectionMode;
+  bulkSelectedIds.clear();
+
+  $('tagSelectBtn').textContent=
+    tagSelectionMode
+      ? 'Annulla selezione'
+      : 'Seleziona';
+
+  $('tagSelectBtn').classList.toggle(
+    'primary',
+    tagSelectionMode
+  );
+
+  updateBulkSelectionUI();
+  await renderTagGallery();
+}
+
+function selectAllCurrentTagPhotos(){
+  currentTagPhotos.forEach(
+    p=>bulkSelectedIds.add(String(p.id))
+  );
+
+  renderTagGallery();
+  updateBulkSelectionUI();
 }
 
 function toggleBulkPhoto(photoId,force){
@@ -1301,14 +1350,26 @@ async function photoToShareFile(p,index){
 async function shareSelectedPhotos(source){
   const all=await getUnifiedPhotos();
   let ids=[...bulkSelectedIds];
+
   if(source==='map'){
     const allowed=new Set(currentMapGroup.map(p=>String(p.id)));
     ids=ids.filter(id=>allowed.has(String(id)));
   }
+
+  if(source==='tag'){
+    const allowed=new Set(currentTagPhotos.map(p=>String(p.id)));
+    ids=ids.filter(id=>allowed.has(String(id)));
+  }
+
   const photos=ids.map(id=>all.find(p=>String(p.id)===String(id))).filter(Boolean);
   if(!photos.length){alert('Seleziona almeno una foto.');return;}
 
-  const btn=source==='map'?$('mapShareSelectedBtn'):$('archiveShareBtn');
+  const btn=
+    source==='map'
+      ? $('mapShareSelectedBtn')
+      : source==='tag'
+        ? $('tagShareBtn')
+        : $('archiveShareBtn');
   const oldText=btn?.textContent||'';
   if(btn){btn.disabled=true;btn.textContent='Preparo foto…';}
 
@@ -1372,10 +1433,58 @@ function renderTagFilters(){
 
 async function renderTagGallery(){
   const all=await getUnifiedPhotos();
-  const photos=all.filter(p=>[...activeTags].every(t=>(p.tags||[]).includes(t)));
-  $('tagEmpty').classList.toggle('hidden',photos.length>0);
-  $('tagGallery').innerHTML=photos.map(photoCardHTML).join('');
-  bindPhotoCards($('tagGallery'),all);
+
+  const photos=all.filter(
+    p=>
+      [...activeTags]
+        .every(
+          t=>(p.tags||[]).includes(t)
+        )
+  );
+
+  currentTagPhotos=photos;
+
+  // Mantiene selezionate solo foto ancora visibili dopo il cambio filtro.
+  if(tagSelectionMode){
+    const visibleIds=new Set(
+      photos.map(p=>String(p.id))
+    );
+
+    [...bulkSelectedIds].forEach(id=>{
+      if(!visibleIds.has(String(id))){
+        bulkSelectedIds.delete(String(id));
+      }
+    });
+  }
+
+  $('tagEmpty').classList.toggle(
+    'hidden',
+    photos.length>0
+  );
+
+  $('tagGallery').innerHTML=
+    photos
+      .map(
+        p=>
+          photoCardHTML(
+            p,
+            {
+              selectable:tagSelectionMode,
+              selected:bulkSelectedIds.has(String(p.id))
+            }
+          )
+      )
+      .join('');
+
+  bindPhotoCards(
+    $('tagGallery'),
+    all,
+    {
+      selectionMode:tagSelectionMode
+    }
+  );
+
+  updateBulkSelectionUI();
 }
 
 
@@ -1445,7 +1554,13 @@ function openPhoto(id,all){
   currentModalPhotoId=String(id); $('modalImg').src=p.image;
   const hasGps=p.lat!==null&&p.lng!==null&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng));
   $('modalMeta').innerHTML=`<strong>${new Date(p.createdAt).toLocaleString('it-IT')}</strong><div class="muted">${p.dateSource?`Data: ${escapeHtml(p.dateSource)}<br>`:''}${hasGps?`GPS ${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)} · ±${Math.round(p.accuracy||0)} m${p.gpsSource?` · ${escapeHtml(p.gpsSource)}`:''}`:'Posizione non presente nel file selezionato'}</div><div class="tag-row">${(p.tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>${p.aiSummary?`<div class="ai-summary">${escapeHtml(p.aiSummary)}</div>`:''}`;
-  $('assignCurrentLocationBtn').classList.toggle('hidden',hasGps); renderManualTagEditor(p); $('photoModal').classList.remove('hidden');
+  $('assignCurrentLocationBtn').classList.toggle('hidden',hasGps);
+  renderManualTagEditor(p);
+  if($('manualTagSaveStatus')){
+    $('manualTagSaveStatus').textContent='';
+    $('manualTagSaveStatus').classList.remove('ok','error');
+  }
+  $('photoModal').classList.remove('hidden');
 }
 
 
@@ -1475,35 +1590,243 @@ function renderManualTagEditor(photo){
 }
 
 async function toggleManualTag(photoId,tag){
-  const p=await resolvePhoto(photoId); if(!p)return;
-  p.manualTags=Array.isArray(p.manualTags)?p.manualTags:[];
-  if(p.manualTags.includes(tag)) p.manualTags=p.manualTags.filter(x=>x!==tag);
-  else p.manualTags=normalizeTags([...p.manualTags,tag]);
-  p.tags=mergeDisplayTags(p.tags,p.manualTags);
-  await persistManualTags(p);
-  renderManualTagEditor(p); refreshModalMeta(p); await refreshVisibleViews();
+  const p=await resolvePhoto(photoId);
+  if(!p)return;
+
+  p.manualTags=
+    Array.isArray(p.manualTags)
+      ? p.manualTags
+      : [];
+
+  if(p.manualTags.includes(tag)){
+    p.manualTags=
+      p.manualTags.filter(
+        x=>x!==tag
+      );
+  }else{
+    p.manualTags=
+      normalizeTags([
+        ...p.manualTags,
+        tag
+      ]);
+  }
+
+  p.tags=
+    mergeDisplayTags(
+      p.tags,
+      p.manualTags
+    );
+
+  // Salva il draft localmente nel record visualizzato;
+  // il salvataggio Drive avviene col pulsante esplicito.
+  const local=await getAllPhotos();
+  const rec=local.find(
+    x=>String(x.id)===String(photoId)
+  );
+
+  if(rec){
+    rec.manualTags=p.manualTags||[];
+    rec.tags=p.tags||[];
+    await putPhoto(rec);
+  }
+
+  const status=$('manualTagSaveStatus');
+  if(status){
+    status.textContent='Modifiche da salvare';
+    status.classList.remove('ok','error');
+  }
+
+  renderManualTagEditor(p);
+  refreshModalMeta(p);
 }
 
 
 async function addCustomManualTag(){
-  const raw=$('manualTagInput').value.trim().toLowerCase();
-  if(!raw||currentModalPhotoId==null)return;
-  const clean=raw.replace(/\s+/g,' ').slice(0,30);
-  const p=await resolvePhoto(currentModalPhotoId); if(!p)return;
-  p.manualTags=normalizeTags([...(p.manualTags||[]),clean]);
-  p.tags=mergeDisplayTags(p.tags,p.manualTags);
-  await persistManualTags(p);
+  const raw=
+    $('manualTagInput')
+      .value
+      .trim()
+      .toLowerCase();
+
+  if(
+    !raw||
+    currentModalPhotoId==null
+  ){
+    return;
+  }
+
+  const clean=
+    raw
+      .replace(/\s+/g,' ')
+      .slice(0,30);
+
+  const p=
+    await resolvePhoto(
+      currentModalPhotoId
+    );
+
+  if(!p)return;
+
+  p.manualTags=
+    normalizeTags([
+      ...(p.manualTags||[]),
+      clean
+    ]);
+
+  p.tags=
+    mergeDisplayTags(
+      p.tags,
+      p.manualTags
+    );
+
+  const local=
+    await getAllPhotos();
+
+  const rec=
+    local.find(
+      x=>
+        String(x.id)===
+        String(currentModalPhotoId)
+    );
+
+  if(rec){
+    rec.manualTags=p.manualTags||[];
+    rec.tags=p.tags||[];
+    await putPhoto(rec);
+  }
+
   $('manualTagInput').value='';
-  renderManualTagEditor(p); refreshModalMeta(p); await refreshVisibleViews();
+
+  const status=$('manualTagSaveStatus');
+
+  if(status){
+    status.textContent='Modifiche da salvare';
+    status.classList.remove('ok','error');
+  }
+
+  renderManualTagEditor(p);
+  refreshModalMeta(p);
 }
 
 
 async function removeManualTag(photoId,tag){
-  const p=await resolvePhoto(photoId); if(!p)return;
-  p.manualTags=(p.manualTags||[]).filter(x=>x!==tag);
-  p.tags=(p.tags||[]).filter(x=>x!==tag);
-  await persistManualTags(p);
-  renderManualTagEditor(p); refreshModalMeta(p); await refreshVisibleViews();
+  const p=await resolvePhoto(photoId);
+  if(!p)return;
+
+  p.manualTags=
+    (p.manualTags||[])
+      .filter(
+        x=>x!==tag
+      );
+
+  p.tags=
+    (p.tags||[])
+      .filter(
+        x=>x!==tag
+      );
+
+  const local=
+    await getAllPhotos();
+
+  const rec=
+    local.find(
+      x=>String(x.id)===String(photoId)
+    );
+
+  if(rec){
+    rec.manualTags=p.manualTags||[];
+    rec.tags=p.tags||[];
+    await putPhoto(rec);
+  }
+
+  const status=$('manualTagSaveStatus');
+
+  if(status){
+    status.textContent='Modifiche da salvare';
+    status.classList.remove('ok','error');
+  }
+
+  renderManualTagEditor(p);
+  refreshModalMeta(p);
+}
+
+
+async function saveCurrentManualTags(){
+  if(currentModalPhotoId==null){
+    return;
+  }
+
+  const btn=$('saveManualTagsBtn');
+  const status=$('manualTagSaveStatus');
+
+  const oldText=btn?.textContent||'Salva tag manuali';
+
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='Salvataggio…';
+  }
+
+  if(status){
+    status.textContent='';
+    status.classList.remove('ok','error');
+  }
+
+  try{
+    const p=await resolvePhoto(
+      currentModalPhotoId
+    );
+
+    if(!p){
+      throw new Error(
+        'Foto non trovata.'
+      );
+    }
+
+    /*
+      Ricostruisce i tag visualizzati mantenendo
+      quelli AI + quelli manuali scelti.
+    */
+    p.manualTags=normalizeTags(
+      p.manualTags||[]
+    );
+
+    p.tags=mergeDisplayTags(
+      p.tags,
+      p.manualTags
+    );
+
+    await persistManualTags(p);
+
+    renderManualTagEditor(p);
+    refreshModalMeta(p);
+    await refreshVisibleViews();
+
+    if(status){
+      status.textContent='✓ Tag salvati';
+      status.classList.add('ok');
+    }
+
+  }catch(err){
+
+    console.error(
+      'FM Foto salvataggio tag manuali:',
+      err
+    );
+
+    if(status){
+      status.textContent=
+        `Errore: ${String(err?.message||err)}`;
+      status.classList.add('error');
+    }
+
+  }finally{
+
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=oldText;
+    }
+
+  }
 }
 
 async function resolvePhoto(photoId){

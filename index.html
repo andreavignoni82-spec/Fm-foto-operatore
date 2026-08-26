@@ -8,8 +8,8 @@
 <title>FM foto</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="styles.css?v=7.7.5">
-<link rel="stylesheet" href="operator.css?v=7.7.5">
+<link rel="stylesheet" href="styles.css?v=7.7.6">
+<link rel="stylesheet" href="operator.css?v=7.7.6">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 </head>
 <body class="operator-body">
@@ -102,8 +102,16 @@
   <section id="tagsView" class="operator-view">
     <div class="operator-title">
       <h1>Tag</h1>
-      <p>Filtra le foto per tipologia.</p>
+      <p>Filtra le foto per tipologia, seleziona quelle che vuoi e condividile insieme.</p>
     </div>
+
+    <div class="tag-view-tools">
+      <button id="tagSelectBtn" class="fm-btn secondary compact" type="button">Seleziona</button>
+      <button id="tagSelectAllBtn" class="fm-btn secondary compact hidden" type="button">Seleziona tutte</button>
+      <button id="tagClearSelectionBtn" class="fm-btn secondary compact hidden" type="button">Deseleziona</button>
+      <button id="tagShareBtn" class="fm-btn primary compact hidden" type="button" disabled>Condividi (0)</button>
+    </div>
+
     <div id="tagFilters" class="tag-filters"></div>
     <div id="tagGallery" class="gallery"></div>
     <div id="tagEmpty" class="fm-card empty hidden">Nessuna foto corrisponde ai filtri.</div>
@@ -175,6 +183,12 @@
         <button id="addManualTagBtn" class="fm-btn primary compact" type="button">Aggiungi</button>
       </div>
       <div id="manualTagList" class="tag-row manual-tag-list"></div>
+
+      <div class="manual-tag-actions">
+        <button id="saveManualTagsBtn" class="fm-btn primary compact" type="button">💾 Salva tag manuali</button>
+        <span id="manualTagSaveStatus" class="manual-tag-save-status"></span>
+      </div>
+
       <button id="assignCurrentLocationBtn" class="fm-btn secondary compact location-assign-btn hidden" type="button">📍 Assegna posizione attuale</button>
     </div>
   </div>
@@ -182,7 +196,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
-<script src="config.js?v=7.7.5"></script>
-<script src="operator.js?v=7.7.5"></script>
+<script src="config.js?v=7.7.6"></script>
+<script src="operator.js?v=7.7.6"></script>
 </body>
 </html>

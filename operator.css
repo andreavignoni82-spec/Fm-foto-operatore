@@ -119,3 +119,36 @@
   .map-location-head{align-items:center}
   .photo-select-toggle{width:36px;height:36px}
 }
+
+
+/* ===== V2.7.6 TAG MULTISELECT + MANUAL SAVE ===== */
+
+.tag-view-tools{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin:0 0 12px;
+}
+
+.manual-tag-actions{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+
+.manual-tag-save-status{
+  font-size:13px;
+  font-weight:700;
+  color:#64748b;
+}
+
+.manual-tag-save-status.ok{
+  color:#16803c;
+}
+
+.manual-tag-save-status.error{
+  color:#b42318;
+}
+
