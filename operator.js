@@ -2,7 +2,7 @@ const DB_NAME='famaferFotoCantiere';
 const DB_VERSION=21;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.6.2';
+const APP_VERSION='7.7.6.3';
 
 let db=null;
 let currentPosition=null;
@@ -660,13 +660,6 @@ function normalizeTags(a){
       .filter(Boolean)
   )].slice(0,8);
 }
-function displayTagsWithoutPlaceholder(tags){
-  const normalized=normalizeTags(tags||[]);
-  const placeholders=new Set(['da classificare','da-classificare','non classificato','non classificata','pending']);
-  const real=normalized.filter(t=>!placeholders.has(String(t).trim().toLowerCase()));
-  return real.length ? real : normalized;
-}
-
 
 async function updateCount(){
   $('photoCount').textContent=(await getAllPhotos()).length;
@@ -1495,6 +1488,14 @@ async function renderTagGallery(){
 }
 
 
+
+function visiblePhotoTags(tags){
+  const normalized=normalizeTags(tags||[]);
+  const placeholders=['da classificare','da-classificare','non classificato','non classificata','pending'];
+  const real=normalized.filter(tag=>!placeholders.includes(String(tag).trim().toLowerCase()));
+  return real.length ? real : normalized;
+}
+
 function photoCardHTML(p,options={}){
   const noGps=(
     p.lat===null||
@@ -1802,6 +1803,7 @@ async function saveCurrentManualTags(){
       p.manualTags
     );
 
+    p.tags=visiblePhotoTags(p.tags||[]);
     await persistManualTags(p);
 
     renderManualTagEditor(p);
