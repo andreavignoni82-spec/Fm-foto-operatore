@@ -2,7 +2,7 @@ const DB_NAME='famaferFotoCantiere';
 const DB_VERSION=22;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.6.4';
+const APP_VERSION='7.7.6.5';
 
 let db=null;
 let currentPosition=null;
@@ -660,6 +660,13 @@ function normalizeTags(a){
       .filter(Boolean)
   )].slice(0,8);
 }
+function visibleClassificationTags(photo){
+  const combined=normalizeTags([...(photo?.tags||[]),...(photo?.manualTags||[])]);
+  const placeholders=new Set(['da classificare','da-classificare','non classificato','non classificata','pending']);
+  const real=combined.filter(t=>!placeholders.has(String(t||'').trim().toLowerCase()));
+  return real.length ? real : ['da classificare'];
+}
+
 
 async function updateCount(){
   $('photoCount').textContent=(await getAllPhotos()).length;
@@ -1497,6 +1504,7 @@ function visiblePhotoTags(tags){
 }
 
 function photoCardHTML(p,options={}){
+  p={...p,tags:visibleClassificationTags(p)};
   const noGps=(
     p.lat===null||
     p.lng===null||

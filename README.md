@@ -1,18 +1,12 @@
-# FM Foto Operatore V2.7.6.4 — DB Recovery Fix
+FM Foto Operatore V2.7.6.5 — TAG LABEL FIX
 
-## Problema corretto
-La V2.7.6.1 aveva già aggiornato IndexedDB alla versione 22.
-Le versioni successive impostate a DB_VERSION 21 generavano:
+Partenza: V2.7.6.4 funzionante.
+DB_VERSION resta 22.
 
-VersionError: The requested version (21) is less than the existing version (22)
+Regola visiva:
+- nessun tag reale -> `da classificare`;
+- almeno un tag reale -> `da classificare` non viene mostrato.
 
-## Soluzione
-- DB_VERSION riportato correttamente a 22.
-- Nessuna cancellazione database.
-- Nessuna migrazione dati.
-- Nessuna modifica alle foto esistenti.
-- Archivio, Tag, Mappa e gruppi foto restano quelli della base funzionante.
-- Fix visivo `da classificare` mantenuto in modo non distruttivo.
-- Worker Gemini V2.11.1 invariato.
-
-Dopo il deploy, aggiornare forzatamente la pagina/PWA.
+La funzione usa una copia temporanea della foto esclusivamente per costruire la card:
+non modifica IndexedDB, non migra dati, non altera Archivio/Mappa/Drive.
+Worker Gemini invariato.
