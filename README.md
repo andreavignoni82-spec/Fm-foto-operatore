@@ -1,30 +1,11 @@
-# FM Foto Operatore V2.7.4.1 — AI Status Timeout Fix
+# FM Foto Operatore V2.7.5 — Mappa gruppi + condivisione multipla
 
-Questa versione mantiene integralmente:
-- AI Fix V2.7.4
-- EXIF/Data/GPS Fix V2.7.3
-- Queue Fix V2.7.2
+Novità:
+- toccando un punto della mappa si apre una galleria con **tutte le foto** presenti entro 25 m;
+- selezione multipla delle foto nella galleria di una posizione;
+- condivisione multipla nativa tramite Share Sheet;
+- Archivio: pulsante **Seleziona**, selezione multipla e **Condividi (N)**;
+- le foto remote vengono scaricate dal Worker e condivise come veri file immagine;
+- nessuna modifica al Worker necessaria.
 
-## Correzione
-Il controllo iniziale AI non può più restare bloccato su:
-`AI: verifica in corso…`
-
-Nuovo comportamento:
-- timeout massimo: 5 secondi;
-- gestione HTTP;
-- gestione JSON non valido;
-- gestione rete/CORS;
-- stato binding AI esplicito;
-- un solo retry automatico dopo circa 1,8 secondi.
-
-## Stati possibili
-- AI: disponibile · Worker X
-- AI: binding Cloudflare non configurato
-- AI: Worker raggiungibile · stato binding non dichiarato
-- AI: verifica scaduta · backend lento/non raggiungibile
-- AI: backend non raggiungibile
-- AI/backend: HTTP NNN
-
-## Installazione
-Aggiornare solo GitHub/PWA.
-Worker Cloudflare invariato: V2.9+.
+Compatibilità migliore: Safari/iPhone/PWA con Web Share API Level 2.

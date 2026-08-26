@@ -1,8 +1,8 @@
 const DB_NAME='famaferFotoCantiere';
-const DB_VERSION=18;
+const DB_VERSION=20;
 const STORE='photos';
 const SETTINGS_STORE='settings';
-const APP_VERSION='7.7.4.1';
+const APP_VERSION='7.7.5';
 
 let db=null;
 let currentPosition=null;
@@ -53,6 +53,12 @@ async function init(){
   renderTagFilters();
   $('archiveImportInput').addEventListener('change',handleArchiveImport);
   $('missingGpsBtn').addEventListener('click',async()=>{showMissingGpsOnly=!showMissingGpsOnly;$('missingGpsBtn').classList.toggle('primary',showMissingGpsOnly);await renderArchive();});
+  $('archiveSelectBtn').addEventListener('click',toggleArchiveSelectionMode);
+  $('archiveShareBtn').addEventListener('click',()=>shareSelectedPhotos('archive'));
+  $('mapSelectAllBtn').addEventListener('click',selectAllCurrentMapGroup);
+  $('mapClearSelectionBtn').addEventListener('click',clearBulkSelection);
+  $('mapShareSelectedBtn').addEventListener('click',()=>shareSelectedPhotos('map'));
+  $('closeMapLocationBtn').addEventListener('click',closeMapLocationGroup);
   $('assignCurrentLocationBtn').addEventListener('click',assignCurrentLocationToOpenPhoto);
   $('startQueueBtn').addEventListener('click',async()=>{
     await recoverInterruptedQueue();
@@ -683,6 +689,9 @@ let importQueueRunning=false;
 let map=null,markersLayer=null;
 let activeTags=new Set();
 let mapTags=new Set();
+let bulkSelectedIds=new Set();
+let archiveSelectionMode=false;
+let currentMapGroup=[];
 
 function bindNavigation(){
   document.querySelectorAll('.nav-btn').forEach(btn=>{
@@ -1222,13 +1231,116 @@ async function assignCurrentLocationToOpenPhoto(){
   refreshModalMeta(p); await refreshVisibleViews();
 }
 
+
+function updateBulkSelectionUI(){
+  const count=bulkSelectedIds.size;
+  const a=$('archiveShareBtn');
+  const m=$('mapShareSelectedBtn');
+
+  if(a){
+    a.textContent=`Condividi (${count})`;
+    a.disabled=count===0;
+    a.classList.toggle('hidden',!archiveSelectionMode);
+  }
+
+  if(m){
+    const mapCount=currentMapGroup.filter(p=>bulkSelectedIds.has(String(p.id))).length;
+    m.textContent=`Condividi (${mapCount})`;
+    m.disabled=mapCount===0;
+  }
+}
+
+async function toggleArchiveSelectionMode(){
+  archiveSelectionMode=!archiveSelectionMode;
+  bulkSelectedIds.clear();
+  $('archiveSelectBtn').textContent=archiveSelectionMode?'Annulla selezione':'Seleziona';
+  $('archiveSelectBtn').classList.toggle('primary',archiveSelectionMode);
+  updateBulkSelectionUI();
+  await renderArchive();
+}
+
+function toggleBulkPhoto(photoId,force){
+  const id=String(photoId);
+  const shouldSelect=typeof force==='boolean'?force:!bulkSelectedIds.has(id);
+  if(shouldSelect)bulkSelectedIds.add(id); else bulkSelectedIds.delete(id);
+  updateBulkSelectionUI();
+  document.querySelectorAll(`[data-select-photo-id="${CSS.escape(id)}"]`).forEach(b=>{
+    b.classList.toggle('selected',shouldSelect);
+    b.textContent=shouldSelect?'✓':'○';
+  });
+  document.querySelectorAll(`.photo-card[data-id="${CSS.escape(id)}"]`).forEach(c=>c.classList.toggle('bulk-selected',shouldSelect));
+}
+
+function clearBulkSelection(){
+  bulkSelectedIds.clear();
+  document.querySelectorAll('.photo-card.bulk-selected').forEach(c=>c.classList.remove('bulk-selected'));
+  document.querySelectorAll('.photo-select-toggle').forEach(b=>{b.classList.remove('selected');b.textContent='○';});
+  updateBulkSelectionUI();
+}
+
+function selectAllCurrentMapGroup(){
+  currentMapGroup.forEach(p=>bulkSelectedIds.add(String(p.id)));
+  renderMapLocationGroupCards();
+  updateBulkSelectionUI();
+}
+
+function photoFileName(p,index=0){
+  const date=new Date(Number(p.createdAt)||Date.now());
+  const stamp=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}_${String(date.getHours()).padStart(2,'0')}-${String(date.getMinutes()).padStart(2,'0')}`;
+  return `FM-Foto_${stamp}_${index+1}.jpg`;
+}
+
+async function photoToShareFile(p,index){
+  const response=await fetch(p.image,{cache:'no-store'});
+  if(!response.ok)throw new Error(`Impossibile scaricare una foto (${response.status})`);
+  const blob=await response.blob();
+  const type=blob.type&&blob.type.startsWith('image/')?blob.type:'image/jpeg';
+  return new File([blob],photoFileName(p,index),{type,lastModified:Number(p.createdAt)||Date.now()});
+}
+
+async function shareSelectedPhotos(source){
+  const all=await getUnifiedPhotos();
+  let ids=[...bulkSelectedIds];
+  if(source==='map'){
+    const allowed=new Set(currentMapGroup.map(p=>String(p.id)));
+    ids=ids.filter(id=>allowed.has(String(id)));
+  }
+  const photos=ids.map(id=>all.find(p=>String(p.id)===String(id))).filter(Boolean);
+  if(!photos.length){alert('Seleziona almeno una foto.');return;}
+
+  const btn=source==='map'?$('mapShareSelectedBtn'):$('archiveShareBtn');
+  const oldText=btn?.textContent||'';
+  if(btn){btn.disabled=true;btn.textContent='Preparo foto…';}
+
+  try{
+    const files=[];
+    for(let i=0;i<photos.length;i++)files.push(await photoToShareFile(photos[i],i));
+
+    if(navigator.share && (!navigator.canShare || navigator.canShare({files}))){
+      await navigator.share({
+        title:`FM Foto · ${files.length} foto`,
+        text:`${files.length} fotografie selezionate da FM Foto`,
+        files
+      });
+    }else{
+      throw new Error('La condivisione multipla di fotografie non è supportata da questo browser. Apri FM Foto da Safari/iPhone o da un browser compatibile.');
+    }
+  }catch(err){
+    if(err?.name!=='AbortError')alert(String(err?.message||err));
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=oldText;}
+    updateBulkSelectionUI();
+  }
+}
+
 async function renderArchive(){
   await updateQueueStatus();
   let photos=await getUnifiedPhotos(true);
   if(showMissingGpsOnly){photos=photos.filter(p=>p.lat===null||p.lng===null||!Number.isFinite(Number(p.lat))||!Number.isFinite(Number(p.lng)));}
   const host=$('archiveGallery'); if(!host)return;
   $('archiveEmpty').classList.toggle('hidden',photos.length>0);
-  host.innerHTML=photos.map(photoCardHTML).join(''); bindPhotoCards(host,photos);
+  host.innerHTML=photos.map(p=>photoCardHTML(p,{selectable:archiveSelectionMode,selected:bulkSelectedIds.has(String(p.id))})).join(''); bindPhotoCards(host,photos,{selectionMode:archiveSelectionMode});
+  updateBulkSelectionUI();
 }
 
 
@@ -1267,7 +1379,7 @@ async function renderTagGallery(){
 }
 
 
-function photoCardHTML(p){
+function photoCardHTML(p,options={}){
   const noGps=(
     p.lat===null||
     p.lng===null||
@@ -1294,16 +1406,37 @@ function photoCardHTML(p){
     }
   }
 
-  return `<button class="photo-card ${noGps?'no-gps':''} ${queueClass}" data-id="${escapeHtml(p.id)}">
+  const selected=!!options.selected;
+  const selector=options.selectable
+    ? `<button type="button" class="photo-select-toggle ${selected?'selected':''}" data-select-photo-id="${escapeHtml(p.id)}" aria-label="Seleziona foto">${selected?'✓':'○'}</button>`
+    : '';
+
+  return `<button class="photo-card ${noGps?'no-gps':''} ${queueClass} ${selected?'bulk-selected':''}" data-id="${escapeHtml(p.id)}">
     <img src="${p.image}" alt="Foto cantiere">
+    ${selector}
     ${queueLabel?`<span class="queue-photo-badge">${escapeHtml(queueLabel)}</span>`:''}
     <div class="overlay">${new Date(p.createdAt).toLocaleDateString('it-IT')}<br>${(p.tags||[]).slice(0,3).map(escapeHtml).join(' · ')}</div>
   </button>`;
 }
 
-function bindPhotoCards(host,all){
+function bindPhotoCards(host,all,options={}){
+  host.querySelectorAll('.photo-select-toggle').forEach(toggle=>{
+    toggle.onclick=e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      toggleBulkPhoto(toggle.dataset.selectPhotoId);
+    };
+  });
+
   host.querySelectorAll('.photo-card').forEach(card=>{
-    card.onclick=()=>openPhoto(card.dataset.id,all);
+    card.onclick=e=>{
+      if(e.target.closest('.photo-select-toggle'))return;
+      if(options.selectionMode){
+        toggleBulkPhoto(card.dataset.id);
+        return;
+      }
+      openPhoto(card.dataset.id,all);
+    };
   });
 }
 
@@ -1434,23 +1567,47 @@ async function renderMap(){
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
     markersLayer=L.layerGroup().addTo(map);
   }
-  setTimeout(()=>map.invalidateSize(),100); markersLayer.clearLayers();
+  setTimeout(()=>map.invalidateSize(),100);
+  markersLayer.clearLayers();
 
   const groups=groupNearby(photos,25),bounds=[];
   groups.forEach(g=>{
     const lat=g.reduce((s,p)=>s+Number(p.lat),0)/g.length;
     const lng=g.reduce((s,p)=>s+Number(p.lng),0)/g.length;
     bounds.push([lat,lng]);
-    const first=g[0],tags=[...new Set(g.flatMap(p=>p.tags||[]))].slice(0,8);
-    L.marker([lat,lng]).addTo(markersLayer).bindPopup(
-      `<strong>${g.length} foto</strong><br>${tags.map(escapeHtml).join(' · ')}<br>`+
-      `<img src="${first.image}" style="width:180px;border-radius:8px;margin-top:8px">`
+    const tags=[...new Set(g.flatMap(p=>p.tags||[]))].slice(0,8);
+    const preview=g.slice(0,4).map(p=>`<img src="${p.image}" class="map-popup-thumb" alt="">`).join('');
+    const marker=L.marker([lat,lng]).addTo(markersLayer).bindPopup(
+      `<strong>${g.length} ${g.length===1?'foto':'foto'}</strong><br>${tags.map(escapeHtml).join(' · ')}<div class="map-popup-grid">${preview}</div><div class="map-popup-hint">Tocca il punto per vedere tutte le foto.</div>`
     );
+    marker.on('click',()=>openMapLocationGroup(g,lat,lng));
   });
+
   if(bounds.length===1)map.setView(bounds[0],16);
   else if(bounds.length>1)map.fitBounds(bounds,{padding:[25,25]});
 }
 
+function openMapLocationGroup(group,lat,lng){
+  currentMapGroup=[...group].sort((a,b)=>b.createdAt-a.createdAt);
+  $('mapLocationTitle').textContent=`${currentMapGroup.length} foto in questa posizione`;
+  $('mapLocationSub').textContent=`${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
+  $('mapLocationPanel').classList.remove('hidden');
+  renderMapLocationGroupCards();
+  setTimeout(()=>$('mapLocationPanel').scrollIntoView({behavior:'smooth',block:'start'}),100);
+}
+
+function renderMapLocationGroupCards(){
+  const host=$('mapLocationGallery');
+  host.innerHTML=currentMapGroup.map(p=>photoCardHTML(p,{selectable:true,selected:bulkSelectedIds.has(String(p.id))})).join('');
+  bindPhotoCards(host,currentMapGroup,{selectionMode:false});
+  updateBulkSelectionUI();
+}
+
+function closeMapLocationGroup(){
+  currentMapGroup=[];
+  $('mapLocationPanel').classList.add('hidden');
+  updateBulkSelectionUI();
+}
 
 function renderMapFilterBar(allPhotos=[]){
   const host=$('mapTagBar');

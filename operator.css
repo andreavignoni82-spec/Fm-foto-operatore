@@ -92,3 +92,30 @@
   min-width:0;
   overflow-wrap:anywhere;
 }
+
+/* =========================================================
+   V2.7.5 - selezione multipla e gruppi mappa
+========================================================= */
+.photo-card{position:relative}
+.photo-card.bulk-selected{outline:4px solid #1976d2;outline-offset:-4px}
+.photo-select-toggle{
+  position:absolute;top:9px;right:9px;z-index:5;width:38px;height:38px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.95);background:rgba(15,23,42,.72);color:#fff;font-size:24px;line-height:32px;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.25)
+}
+.photo-select-toggle.selected{background:#1976d2;border-color:#fff;font-size:20px;font-weight:800}
+.bulk-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px}
+.map-location-panel{margin-top:14px;padding:14px}
+.map-location-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.map-location-head strong{font-size:18px;display:block}
+.map-location-head small{display:block;margin-top:3px;color:#64748b}
+.map-location-gallery{margin-top:6px}
+.map-popup-grid{display:grid;grid-template-columns:repeat(2,80px);gap:4px;margin-top:8px}
+.map-popup-thumb{width:80px;height:64px;object-fit:cover;border-radius:7px;display:block}
+.map-popup-hint{font-size:11px;color:#64748b;margin-top:6px}
+.archive-tools{flex-wrap:wrap}
+@media(max-width:600px){
+  .bulk-toolbar .fm-btn{flex:1 1 auto}
+  .map-location-head{align-items:center}
+  .photo-select-toggle{width:36px;height:36px}
+}
